@@ -10,7 +10,13 @@ from PyQt5.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QComboBox,
-    QLabel
+    QLabel,
+    QDialog,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QFormLayout,
+    QColorDialog
 )
 from PyQt5.QtGui import QColor
 from PyQt5.QtCore import Qt
@@ -27,6 +33,130 @@ class Service:
         self.hours = hours
         self.color_hex = color_hex
 
+class Person:
+    def __init__(self, FullName, ShortName, percentage):
+        self.name = FullName
+        self.short_name = ShortName
+        self.percentage = percentage
+
+class AddPersonDialog(QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Add Person")
+        self.setFixedSize(300, 220)
+
+        layout = QFormLayout(self)
+
+        self.nom_edit = QLineEdit()
+        self.prenom_edit = QLineEdit()
+        self.display_edit = QLineEdit()
+        self.percent_spin = QSpinBox()
+        self.percent_spin.setRange(0, 100)
+        self.percent_spin.setValue(100)
+        self.percent_spin.stepBy(10)
+
+        layout.addRow("Nom : ", self.nom_edit)
+        layout.addRow("Prénom : ", self.prenom_edit)
+        layout.addRow("Affichage : ", self.display_edit)
+        layout.addRow("Pourcentage : ", self.percent_spin)
+
+        buttons_layout = QHBoxLayout()
+        self.create_btn = QPushButton("Créer")
+        self.cancel_btn = QPushButton("Annuler")
+
+        buttons_layout.addWidget(self.create_btn)
+        buttons_layout.addWidget(self.cancel_btn)
+        layout.addRow(buttons_layout)
+
+        self.create_btn.clicked.connect(self._on_create)
+        self.cancel_btn.clicked.connect(self.reject)
+
+        self.nom_edit.textChanged.connect(self._update_display)
+        self.prenom_edit.textChanged.connect(self._update_display)
+
+        self.Person = None
+
+    def _update_display(self):
+        nom = self.nom_edit.text().strip()
+        prenom = self.prenom_edit.text().strip()
+
+        if nom and prenom :
+            self.display_edit.setText(f"{prenom[0].upper()}. {nom}")
+
+    def _on_create(self):
+        if not self.nom_edit.text() or not self.prenom_edit.text():
+            return #Warning popup later
+
+        self.person = Person(
+            FullName = f"{self.prenom_edit.text()} {self.nom_edit.text()}",
+            ShortName = self.display_edit.text(),
+            percentage = self.percent_spin.value()
+        )
+
+        self.accept()
+
+class AddServiceDialog(QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Add Service")
+        self.setFixedSize(300,240)
+
+        layout = QFormLayout(self)
+
+        self.name_edit = QLineEdit()
+        self.short_edit = QLineEdit()
+        self.hours_spin = QSpinBox()
+        self.hours_spin.setRange(6, 12)
+        self.hours_spin.setValue(12)
+
+        self.color_btn = QPushButton("Choisir couleur")
+        self.color = QColor("#FFFFFF")
+        self._update_color_button
+
+        layout.addRow("Nom : ", self.name_edit)
+        layout.addRow("Affichage : ", self.short_edit)
+        layout.addRow("Heures : ", self.hours_spin)
+        layout.addRow("Couleur : ", self.color_btn)
+
+        buttons_layout = QHBoxLayout()
+        self.create_btn = QPushButton("Créer")
+        self.cancel_btn = QPushButton("Annuler")
+
+        buttons_layout.addWidget(self.create_btn)
+        buttons_layout.addWidget(self.cancel_btn)
+        layout.addRow(buttons_layout)
+
+        self.color_btn.clicked.connect(self._choose_color)
+        self.create_btn.clicked.connect(self._on_create)
+        self.cancel_btn.clicked.connect(self.reject)
+
+        self.Service = None
+
+    def _choose_color(self):
+        color = QColorDialog.getColor(self.color, self)
+        if color.isValid():
+            self.color = color
+            self._update_color_button()
+
+    def _update_color_button(self):
+        self.color_btn.setStyleSheet(
+            f"background-color: {self.color.name()};"
+        )
+
+    def _on_create(self):
+        if not self.name_edit.text():
+            return
+
+        self.service = Service(
+            self.name_edit.text(),
+            self.short_edit.text(),
+            self.hours_spin.value(),
+            self.color.name()
+        )
+        self.accept()
+
+
+
 
 # -------------------------
 # MAIN WINDOW
@@ -39,7 +169,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("mshift – Midwife Scheduler")
         self.resize(1100, 600)
 
-        # Example services (hardcoded for now)
+        self.people = []
         self.services = [
             Service("Jour", "J", 12, "#A3D5FF"),
             Service("Nuit", "N", 12, "#FFD6A3"),
@@ -51,9 +181,57 @@ class MainWindow(QMainWindow):
 
         self.main_layout = QVBoxLayout(self.central_widget)
 
+        self._setup_action_buttons()
         self._setup_controls()
         self._setup_table()
         self._update_headers()
+
+    def _setup_action_buttons(self):
+        buttons_layout = QHBoxLayout()
+
+        self.add_person_btn = QLabel("➕ Add Person")
+        self.add_service_btn = QLabel("➕ Add Service")
+
+        # Make them look clickable
+        self.add_person_btn.setStyleSheet(
+            "padding: 6px; border: 1px solid #888; border-radius: 4px;"
+        )
+        self.add_service_btn.setStyleSheet(
+            "padding: 6px; border: 1px solid #888; border-radius: 4px;"
+        )
+
+        self.add_person_btn.setAlignment(Qt.AlignCenter)
+        self.add_service_btn.setAlignment(Qt.AlignCenter)
+
+        self.add_person_btn.mousePressEvent = self._open_add_person
+        self.add_service_btn.mousePressEvent = self._open_add_service
+
+        buttons_layout.addWidget(self.add_person_btn)
+        buttons_layout.addWidget(self.add_service_btn)
+        buttons_layout.addStretch()
+
+        self.main_layout.addLayout(buttons_layout)
+
+    def _open_add_person(self, event):
+        print("Add Person clicked")
+        dialog = AddPersonDialog()
+        if dialog.exec():
+            person = dialog.person
+            self.people.append(person)
+
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setVerticalHeaderItem(
+                row,
+                QTableWidgetItem(person.short_name)
+            )
+
+    def _open_add_service(self, event):
+        print("Add Service clicked")
+        dialog = AddServiceDialog()
+        if dialog.exec():
+            self.services.append(dialog.service)
+
 
 
     # -------------------------
