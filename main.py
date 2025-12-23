@@ -263,6 +263,19 @@ class MainWindow(QMainWindow):
 
     def _setup_table(self):
         self.table = QTableWidget(1, 31)
+        self.table.setShowGrid(False)
+        self.table.horizontalHeader().setStyleSheet("""
+            QHeaderView::section {
+                border-bottom: 5px solid #888;  /* line thickness and color */
+                padding: 4px;                   /* optional, for spacing */
+                background-color : #f0f0f0;
+            }
+        """)
+
+        # Optional: make sure the header uses full height for the border
+        self.table.horizontalHeader().setHighlightSections(False)
+        self.table.horizontalHeader().setStretchLastSection(True)
+
         self.table.verticalHeader().setMinimumWidth(80)
 
         self.table.cellClicked.connect(self._on_cell_clicked)
@@ -294,7 +307,7 @@ class MainWindow(QMainWindow):
                 self._shade_weekend_column(day - 1)
 
     def _shade_weekend_column(self, column):
-        color = QColor(245, 245, 245)
+        color = QColor(200, 200, 200)
 
         for row in range(self.table.rowCount()):
             item = self.table.item(row, column)
