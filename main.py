@@ -226,6 +226,7 @@ class MainWindow(QMainWindow):
                 row,
                 QTableWidgetItem(person.short_name)
             )
+            self._update_headers()
 
     def _open_add_service(self, event):
         print("Add Service clicked")
@@ -262,7 +263,7 @@ class MainWindow(QMainWindow):
 
     def _setup_table(self):
         self.table = QTableWidget(1, 31)
-        self.table.verticalHeader().setMinimumWidth(70)
+        self.table.verticalHeader().setMinimumWidth(80)
 
         self.table.cellClicked.connect(self._on_cell_clicked)
 
@@ -273,6 +274,8 @@ class MainWindow(QMainWindow):
     # LOGIC
     # -------------------------
 
+    FRENCH_DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+    
     def _update_headers(self):
         month = self.month_combo.currentIndex() + 1
         year = int(self.year_combo.currentText())
@@ -283,10 +286,24 @@ class MainWindow(QMainWindow):
         headers = []
         for day in range(1, days_in_month + 1):
             weekday_index = calendar.weekday(year, month, day)
-            weekday_short = calendar.day_abbr[weekday_index].lower()
-            headers.append(f"{weekday_short}\n{day}")
+            weekday_short = self.FRENCH_DAYS[weekday_index]
+            item = QTableWidgetItem((f"{weekday_short}\n{day}"))
+            item.setTextAlignment(Qt.AlignCenter)
+            self.table.setHorizontalHeaderItem(day - 1, item)
+            if weekday_index >= 5:
+                self._shade_weekend_column(day - 1)
 
-        self.table.setHorizontalHeaderLabels(headers)
+    def _shade_weekend_column(self, column):
+        color = QColor(245, 245, 245)
+
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, column)
+
+            if item is None :
+                item = QTableWidgetItem()
+                self.table.setItem(row, column, item)
+
+            item.setBackground(color)
 
 
     def _on_cell_clicked(self, row, column):
