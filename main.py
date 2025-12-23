@@ -264,6 +264,14 @@ class MainWindow(QMainWindow):
     def _setup_table(self):
         self.table = QTableWidget(1, 31)
         self.table.setShowGrid(False)
+
+        # Disable cell selection highlight
+        self.table.setSelectionMode(QTableWidget.NoSelection)
+
+        # Keep headers interactive
+        self.table.horizontalHeader().setSectionsClickable(True)
+        self.table.verticalHeader().setSectionsClickable(True)
+
         self.table.horizontalHeader().setStyleSheet("""
             QHeaderView::section {
                 border-bottom: 5px solid #888;  /* line thickness and color */
@@ -281,6 +289,54 @@ class MainWindow(QMainWindow):
         self.table.cellClicked.connect(self._on_cell_clicked)
 
         self.main_layout.addWidget(self.table)
+
+    def _create_service_combo(self, row, column):
+        combo = QComboBox()
+        combo.addItem("")
+
+        for service in self.services:
+            combo.addItem(service.name)
+
+        combo.setEditable(False)
+        combo.setStyleSheet("""
+            QComboBox {
+                border : none;
+                padding-left : 4px
+            }
+            QComboBox::drop-down {
+                border : none;
+            }
+        """)
+
+        combo.setMaximumHeight(16777215)
+        combo.setMaximumWidth(16777215)
+
+        def on_service_selected(index):
+            if index == 0:
+                combo.setStyleSheet(combo.styleSheet())
+                combo.setCurrentText("")
+                return
+
+            service = self.services[index - 1]
+
+            combo.setCurrentText(service.short_name)
+            combo.setStyleSheet(f"""
+                QComboBox {{
+                    background-color: {service.color_hex};
+                    border: none;
+                    padding-left: 4px;
+                }}
+                QComboBox::drop-down {{
+                    border: none;
+                }}
+            """)
+
+            combo.currentIndexChanged.connect(on_service_selected)
+
+            self.table.setCellWidget(row, column, combo)
+
+            combo.showPopup()
+
 
 
     # -------------------------
@@ -320,17 +376,18 @@ class MainWindow(QMainWindow):
 
 
     def _on_cell_clicked(self, row, column):
-        # Do not recreate if already filled
-        if self.table.cellWidget(row, column) is not None:
-            return
-        if self.table.item(row, column) is not None:
+        # Ignore first empty cell
+        if row == 0 and self.table.verticalHeaderItem(row) is None:
             return
 
-        combo = QComboBox()
-        combo.addItem("")  # empty option
+        combo = self.table.cellWidget(row, column)
 
-        for service in self.services:
-            combo.addItem(service.name)
+        # If already exists, reopen dropdown
+        if isinstance(combo, QComboBox):
+            combo.showPopup()
+            return
+
+        self._create_service_combo(row, column)
 
         def on_service_selected(index):
             if index == 0:
