@@ -74,8 +74,6 @@ class AddPersonDialog(QDialog):
         self.nom_edit.textChanged.connect(self._update_display)
         self.prenom_edit.textChanged.connect(self._update_display)
 
-        self.Person = None
-
     def _update_display(self):
         nom = self.nom_edit.text().strip()
         prenom = self.prenom_edit.text().strip()
@@ -111,7 +109,7 @@ class AddServiceDialog(QDialog):
 
         self.color_btn = QPushButton("Choisir couleur")
         self.color = QColor("#FFFFFF")
-        self._update_color_button
+        self._update_color_button()
 
         layout.addRow("Nom : ", self.name_edit)
         layout.addRow("Affichage : ", self.short_edit)
@@ -129,8 +127,6 @@ class AddServiceDialog(QDialog):
         self.color_btn.clicked.connect(self._choose_color)
         self.create_btn.clicked.connect(self._on_create)
         self.cancel_btn.clicked.connect(self.reject)
-
-        self.Service = None
 
     def _choose_color(self):
         color = QColorDialog.getColor(self.color, self)
@@ -219,8 +215,13 @@ class MainWindow(QMainWindow):
             person = dialog.person
             self.people.append(person)
 
-            row = self.table.rowCount()
-            self.table.insertRow(row)
+            # If this is a first person created, reuse the first empty row
+            if self.table.rowCount() == 1 and self.table.verticalHeaderItem(0) is None :
+                row = 0
+            else:
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+            
             self.table.setVerticalHeaderItem(
                 row,
                 QTableWidgetItem(person.short_name)
@@ -260,15 +261,8 @@ class MainWindow(QMainWindow):
 
 
     def _setup_table(self):
-        # Placeholder: 5 midwives
-        self.table = QTableWidget(5, 31)
-        self.table.setVerticalHeaderLabels([
-            "Alice",
-            "Brigitte",
-            "Clara",
-            "Diane",
-            "Eva"
-        ])
+        self.table = QTableWidget(1, 31)
+        self.table.verticalHeader().setMinimumWidth(70)
 
         self.table.cellClicked.connect(self._on_cell_clicked)
 
