@@ -182,6 +182,8 @@ class MainWindow(QMainWindow):
         self._setup_table()
         self._update_headers()
 
+        self._add_person_to_table(Person("Tiphaine Angibaud", "T. Angibaud", 100))
+
     def _setup_action_buttons(self):
         buttons_layout = QHBoxLayout()
 
@@ -208,25 +210,28 @@ class MainWindow(QMainWindow):
 
         self.main_layout.addLayout(buttons_layout)
 
+    def _add_person_to_table(self, person: Person):
+        self.people.append(person)
+
+        if self.table.rowCount() == 1 and self.table.verticalHeaderItem(0) is None:
+            row = 0
+        else:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+        self.table.setVerticalHeaderItem(
+            row,
+            QTableWidgetItem(person.short_name)
+        )
+
+        self._update_headers()
+
+
     def _open_add_person(self, event):
         print("Add Person clicked")
         dialog = AddPersonDialog()
         if dialog.exec():
-            person = dialog.person
-            self.people.append(person)
-
-            # If this is a first person created, reuse the first empty row
-            if self.table.rowCount() == 1 and self.table.verticalHeaderItem(0) is None :
-                row = 0
-            else:
-                row = self.table.rowCount()
-                self.table.insertRow(row)
-            
-            self.table.setVerticalHeaderItem(
-                row,
-                QTableWidgetItem(person.short_name)
-            )
-            self._update_headers()
+           self._add_person_to_table(dialog.person)
 
     def _open_add_service(self, event):
         print("Add Service clicked")
@@ -292,34 +297,40 @@ class MainWindow(QMainWindow):
 
     def _create_service_combo(self, row, column):
         combo = QComboBox()
+        combo.setEditable(True)
+        combo.lineEdit().setReadOnly(True)
+        combo.lineEdit().setAlignment(Qt.AlignCenter)
+
         combo.addItem("")
 
         for service in self.services:
             combo.addItem(service.name)
 
-        combo.setEditable(False)
         combo.setStyleSheet("""
             QComboBox {
+                background-color : {service.color_hex};
                 border : none;
-                padding-left : 4px
             }
             QComboBox::drop-down {
                 border : none;
             }
         """)
 
-        combo.setMaximumHeight(16777215)
-        combo.setMaximumWidth(16777215)
-
         def on_service_selected(index):
             if index == 0:
-                combo.setStyleSheet(combo.styleSheet())
-                combo.setCurrentText("")
+                combo.setStyleSheet("""
+                    QComboBox {
+                        border: none;
+                        padding-left: 4px;
+                    }
+                """)
                 return
 
             service = self.services[index - 1]
 
-            combo.setCurrentText(service.short_name)
+            combo.setItemText(index, service.short_name)
+            combo.setCurrentIndex(index)
+
             combo.setStyleSheet(f"""
                 QComboBox {{
                     background-color: {service.color_hex};
@@ -331,11 +342,10 @@ class MainWindow(QMainWindow):
                 }}
             """)
 
-            combo.currentIndexChanged.connect(on_service_selected)
+        combo.currentIndexChanged.connect(on_service_selected)
 
-            self.table.setCellWidget(row, column, combo)
-
-            combo.showPopup()
+        self.table.setCellWidget(row, column, combo)
+        combo.showPopup()
 
 
 
@@ -376,33 +386,17 @@ class MainWindow(QMainWindow):
 
 
     def _on_cell_clicked(self, row, column):
-        # Ignore first empty cell
+        # Ignore placeholder row
         if row == 0 and self.table.verticalHeaderItem(row) is None:
             return
 
         combo = self.table.cellWidget(row, column)
 
-        # If already exists, reopen dropdown
         if isinstance(combo, QComboBox):
             combo.showPopup()
             return
 
         self._create_service_combo(row, column)
-
-        def on_service_selected(index):
-            if index == 0:
-                return
-
-            service = self.services[index - 1]
-            item = QTableWidgetItem(service.short_name)
-            item.setTextAlignment(Qt.AlignCenter)
-            item.setBackground(QColor(service.color_hex))
-
-            self.table.setItem(row, column, item)
-            self.table.removeCellWidget(row, column)
-
-        combo.currentIndexChanged.connect(on_service_selected)
-        self.table.setCellWidget(row, column, combo)
 
 
 # -------------------------
