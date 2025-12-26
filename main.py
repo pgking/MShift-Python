@@ -18,7 +18,10 @@ from PyQt5.QtWidgets import (
     QFormLayout,
     QColorDialog
 )
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import (
+    QColor,
+    QBrush
+)
 from PyQt5.QtCore import Qt
 
 
@@ -362,6 +365,8 @@ class MainWindow(QMainWindow):
         days_in_month = calendar.monthrange(year, month)[1]
         self.table.setColumnCount(days_in_month)
 
+        self._clear_cell_backgrounds()
+
         headers = []
         for day in range(1, days_in_month + 1):
             weekday_index = calendar.weekday(year, month, day)
@@ -383,6 +388,14 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, column, item)
 
             item.setBackground(color)
+
+    def _clear_cell_backgrounds(self):
+        for row in range(self.table.rowCount()):
+            for col in range(self.table.columnCount()):
+                item = self.table.item(row, col)
+                if item is not None:
+                    item.setBackground(QBrush())
+
 
 
     def _on_cell_clicked(self, row, column):
