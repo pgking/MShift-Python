@@ -1,5 +1,6 @@
 import sys
 import calendar
+import uuid
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -31,6 +32,7 @@ from PyQt5.QtCore import Qt
 
 class Service:
     def __init__(self, name, short_name, hours, color_hex):
+        self.id = str(uuid.uuid4()) # Unique identifier
         self.name = name
         self.short_name = short_name
         self.hours = hours
@@ -38,6 +40,7 @@ class Service:
 
 class Person:
     def __init__(self, FullName, ShortName, percentage):
+        self.id = str(uuid.uuid4()) # Unique identifier
         self.name = FullName
         self.short_name = ShortName
         self.percentage = percentage
@@ -154,6 +157,22 @@ class AddServiceDialog(QDialog):
         )
         self.accept()
 
+class MonthData:
+    def __init__(self, year : int, month : int):
+        self.year = year
+        self.month = month
+        # key : (person.id, day)
+        self.assignements = {}
+
+    def get_service(self, person_id, day):
+        return self.assignements.get((person_id, day))
+
+    def set_service(self, person_id, day, service_id):
+        if service_id is None :
+            self.assignements.pop((person_id, day), None)
+        
+        else :
+            self.assignements[(person_id, day)] = service_id
 
 
 
@@ -175,6 +194,9 @@ class MainWindow(QMainWindow):
             Service("Planning Familial", "GP", 8, "#C3B1E1"),
         ]
 
+        self.schedule = {} # key : (year, month) -> MonthData
+        self.current_month = None
+
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
 
@@ -186,6 +208,39 @@ class MainWindow(QMainWindow):
         self._update_headers()
 
         self._add_person_to_table(Person("Tiphaine Angibaud", "T. Angibaud", 100))
+
+    def _populate_table_from_month(self):
+        if not self.current_month:
+            return
+
+        for row, person in enumerate(self.people):
+            for day in range(1, self.table.columnCount() + 1):
+                service_id = self.current_month.get_service(person.id, day)
+
+                if service_id is None:
+                    self.table.removeCellWidget(row, day - 1)
+                    continue
+
+                service = next(
+                    (s for s in self.services if s.id == service_id),
+                    None
+                )
+                if service is None:
+                    continue  # service was deleted later
+
+                combo = self._create_service_combo(row, day - 1, service_id)
+                self.table.setCellWidget(row, day - 1, combo)
+
+
+    def _load_month(self):
+        year = int(self.year_combo.currentText())
+        month = self.month_combo.currentIndex() + 1
+        key = (year, month)
+
+        if key not in self.schedule :
+            self.schedule[key] = MonthData(year, month)
+
+        self.current_month = self.schedule[key]
 
     def _setup_action_buttons(self):
         buttons_layout = QHBoxLayout()
@@ -298,7 +353,7 @@ class MainWindow(QMainWindow):
 
         self.main_layout.addWidget(self.table)
 
-    def _create_service_combo(self, row, column):
+    def _create_service_combo(self, row, column, preset_service = None):
         combo = QComboBox()
         combo.setEditable(True)
         combo.lineEdit().setReadOnly(True)
@@ -306,21 +361,15 @@ class MainWindow(QMainWindow):
 
         combo.addItem("")
 
+        person = self.people[row]
+        day = column + 1
+
         for service in self.services:
             combo.addItem(service.name)
 
-        combo.setStyleSheet("""
-            QComboBox {
-                background-color : {service.color_hex};
-                border : none;
-            }
-            QComboBox::drop-down {
-                border : none;
-            }
-        """)
-
         def on_service_selected(index):
             if index == 0:
+                self.current_month.set_service(person.id, day, None)
                 combo.setStyleSheet("""
                     QComboBox {
                         border: none;
@@ -330,6 +379,12 @@ class MainWindow(QMainWindow):
                 return
 
             service = self.services[index - 1]
+
+            self.current_month.set_service(
+                person.id,
+                day,
+                service.id
+            )
 
             combo.setItemText(index, service.short_name)
             combo.setCurrentIndex(index)
@@ -347,8 +402,13 @@ class MainWindow(QMainWindow):
 
         combo.currentIndexChanged.connect(on_service_selected)
 
-        self.table.setCellWidget(row, column, combo)
-        combo.showPopup()
+        if preset_service :
+            for i, service in enumerate(self.services) :
+                if service.id == preset_service :
+                   combo.setCurrentIndex(i + 1)
+                   break
+
+        return combo
 
 
 
@@ -359,6 +419,9 @@ class MainWindow(QMainWindow):
     FRENCH_DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
     
     def _update_headers(self):
+        # CRITICAL, link backend to frontend
+        self._load_month()
+
         month = self.month_combo.currentIndex() + 1
         year = int(self.year_combo.currentText())
 
@@ -376,6 +439,8 @@ class MainWindow(QMainWindow):
             self.table.setHorizontalHeaderItem(day - 1, item)
             if weekday_index >= 5:
                 self._shade_weekend_column(day - 1)
+
+        self._populate_table_from_month()
 
     def _shade_weekend_column(self, column):
         color = QColor(200, 200, 200)
@@ -403,13 +468,13 @@ class MainWindow(QMainWindow):
         if row == 0 and self.table.verticalHeaderItem(row) is None:
             return
 
-        combo = self.table.cellWidget(row, column)
+        combo = self._create_service_combo(row, column)
+        self.table.setCellWidget(row, column, combo)
+        combo.showPopup()
 
-        if isinstance(combo, QComboBox):
-            combo.showPopup()
-            return
+    
 
-        self._create_service_combo(row, column)
+        
 
 
 # -------------------------
