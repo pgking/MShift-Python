@@ -17,7 +17,8 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QSpinBox,
     QFormLayout,
-    QColorDialog
+    QColorDialog,
+    QMenu
 )
 from PyQt5.QtGui import (
     QColor,
@@ -297,6 +298,47 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self.services.append(dialog.service)
 
+    def _open_cell_context_menu(self, position):
+        index = self.table.indexAt(position)
+
+        if not index.isValid():
+            return
+
+        row = index.row()
+        column = index.column()
+
+        # Ignore placeholder row
+        if row == 0 and self.table.verticalHeaderItem(row) is None:
+            return
+
+        # Check if there is actually a service assigned
+        person = self.people[row]
+        day = column + 1
+        service_id = self.current_month.get_service(person.id, day)
+
+        if service_id is None:
+            return  # nothing to delete
+
+        menu = QMenu(self)
+        clear_action = menu.addAction("Clear service")
+
+        action = menu.exec_(self.table.viewport().mapToGlobal(position))
+
+        if action == clear_action:
+            self._clear_cell(row, column)
+
+    def _clear_cell(self, row, column):
+        person = self.people[row]
+        day = column + 1
+
+        # Backend
+        self.current_month.set_service(person.id, day, None)
+
+        # UI
+        self.table.removeCellWidget(row, column)
+
+
+
 
 
     # -------------------------
@@ -330,6 +372,9 @@ class MainWindow(QMainWindow):
 
         # Disable cell selection highlight
         self.table.setSelectionMode(QTableWidget.NoSelection)
+
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._open_cell_context_menu)
 
         # Keep headers interactive
         self.table.horizontalHeader().setSectionsClickable(True)
@@ -410,6 +455,14 @@ class MainWindow(QMainWindow):
 
         return combo
 
+    def _ensure_combo(self, row, column) :
+        combo = self.table.cellWidget(row, column)
+        if combo is None :
+            combo = self._create_service_combo(row, column)
+            self.table.setCellWidget(row, column, combo)
+
+        return combo
+
 
 
     # -------------------------
@@ -468,8 +521,7 @@ class MainWindow(QMainWindow):
         if row == 0 and self.table.verticalHeaderItem(row) is None:
             return
 
-        combo = self._create_service_combo(row, column)
-        self.table.setCellWidget(row, column, combo)
+        combo = self._ensure_combo(row, column)
         combo.showPopup()
 
     
