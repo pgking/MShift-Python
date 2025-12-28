@@ -1,5 +1,8 @@
 import uuid
 from typing import Optional, Dict
+from PyQt5.QtWidgets import QTableWidget
+from PyQt5.QtGui import QPainter, QPen, QColor
+from PyQt5.QtCore import Qt, QRect
 
 class Service:
     def __init__(self, name, short_name, hours, color_hex):
@@ -44,3 +47,50 @@ class MonthData:
         else :
             self.assignments[(person_id, day)] = service_id
 
+class DragTableWidget(QTableWidget):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._drag_rect = None
+        self.FRENCH_DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+
+    def set_drag_rect(self, rect: QRect | None):
+        self._drag_rect = rect
+        self.viewport().update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)  # draw table normally (headers + cells)
+
+        painter = QPainter(self.viewport())
+
+        # ----------------------
+        # Weekend shading
+        # ----------------------
+        color = QColor(200, 200, 200, 120)
+        for col in range(self.columnCount()):
+            if self._is_weekend_column(col):
+                for row in range(self.rowCount()):
+                    rect = self.visualRect(self.model().index(row, col))
+                    painter.fillRect(rect, color)
+
+        # ----------------------
+        # Drag rectangle
+        # ----------------------
+        if self._drag_rect:
+            pen = QPen(Qt.black)
+            pen.setStyle(Qt.DashLine)
+            pen.setWidth(2)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(self._drag_rect)
+        
+        painter.end()
+
+    def _is_weekend_column(self, col):
+        if self.columnCount() == 0:
+            return False
+
+        header_item = self.horizontalHeaderItem(col)
+        if header_item:
+            day_name = header_item.text().split("\n")[0]
+            return day_name in ["Sam", "Dim"]
+        return False

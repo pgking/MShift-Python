@@ -2,7 +2,7 @@ import sys
 import calendar
 import uuid
 
-from models import Person, Service, MonthData
+from models import Person, Service, MonthData, DragTableWidget
 from dialogs import AddPersonDialog, AddServiceDialog
 
 from PyQt5.QtWidgets import (
@@ -24,7 +24,9 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import (
     QColor,
-    QBrush
+    QBrush,
+    QPainter,
+    QPen
 )
 from PyQt5.QtCore import Qt
 
@@ -42,6 +44,7 @@ class MainWindow(QMainWindow):
         self._mouse_pressed_index = None
         self._mouse_press_pos = None
         self._dragging = False
+        self._drag_rect = None
 
 
         self.people = []
@@ -65,6 +68,7 @@ class MainWindow(QMainWindow):
         self._update_headers()
 
         self._add_person_to_table(Person("Tiphaine",  "Angibaud", 100))
+
 
     def _populate_table_from_month(self):
         if not self.current_month:
@@ -188,6 +192,9 @@ class MainWindow(QMainWindow):
                     return False
 
                 if self._dragging:
+                    target_index = self.table.indexAt(event.pos())
+                    if target_index.isValid():
+                        self.table.set_drag_rect(self.table.visualRect(target_index))
                     return True
 
                 distance = (event.pos() - self._mouse_press_pos).manhattanLength()
@@ -214,6 +221,8 @@ class MainWindow(QMainWindow):
                 self._mouse_press_pos = None
                 self._dragging = False
                 self._drag_source = None
+                self.table.set_drag_rect(None)
+                self.table.viewport().update()
                 return True   
 
             # -----------------
@@ -239,6 +248,19 @@ class MainWindow(QMainWindow):
                     self._clear_cell(row, column)
 
                 return True  # ⛔ consume the event
+
+        if obj is self.table.viewport() and event.type() == event.Paint:
+            original = super(MainWindow, self).eventFilter(obj, event)
+            if self._drag_rect:
+                painter = QPainter(self.table.viewport())
+                pen = QPen(Qt.black)
+                pen.setStyle(Qt.DashLine)
+                pen.setWidth(2)
+                painter.setPen(pen)
+                painter.drawRect(self._drag_rect)
+                painter.end()
+            return original
+
 
         return super().eventFilter(obj, event)
 
@@ -296,6 +318,7 @@ class MainWindow(QMainWindow):
         combo.showPopup()
 
 
+
     # -------------------------
     # UI SETUP
     # -------------------------
@@ -322,8 +345,10 @@ class MainWindow(QMainWindow):
 
 
     def _setup_table(self):
-        self.table = QTableWidget(1, 31)
+        self.table = DragTableWidget(1, 31)
         self.table.setShowGrid(False)
+        self.table.setSelectionMode(QTableWidget.NoSelection)
+        self.table.viewport().installEventFilter(self)
 
         # Disable cell selection highlight
         self.table.setSelectionMode(QTableWidget.NoSelection)
@@ -459,7 +484,7 @@ class MainWindow(QMainWindow):
         self._populate_table_from_month()
 
     def _shade_weekend_column(self, column):
-        color = QColor(200, 200, 200)
+        color = QColor(200, 200, 200, 120)
 
         for row in range(self.table.rowCount()):
             item = self.table.item(row, column)
