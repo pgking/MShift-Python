@@ -34,7 +34,7 @@ class AddPersonDialog(QDialog):
         self.percent_spin = QSpinBox()
         self.percent_spin.setRange(0, 100)
         self.percent_spin.setValue(100)
-        self.percent_spin.stepBy(10)
+        self.percent_spin.setSingleStep(5)
 
         layout.addRow("Nom : ", self.nom_edit)
         layout.addRow("Prénom : ", self.prenom_edit)

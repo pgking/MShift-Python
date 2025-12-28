@@ -45,6 +45,7 @@ class MainWindow(QMainWindow):
         self._mouse_press_pos = None
         self._dragging = False
         self._drag_rect = None
+        self._drag_source = None
 
 
         self.people = []
@@ -249,19 +250,6 @@ class MainWindow(QMainWindow):
 
                 return True  # ⛔ consume the event
 
-        if obj is self.table.viewport() and event.type() == event.Paint:
-            original = super(MainWindow, self).eventFilter(obj, event)
-            if self._drag_rect:
-                painter = QPainter(self.table.viewport())
-                pen = QPen(Qt.black)
-                pen.setStyle(Qt.DashLine)
-                pen.setWidth(2)
-                painter.setPen(pen)
-                painter.drawRect(self._drag_rect)
-                painter.end()
-            return original
-
-
         return super().eventFilter(obj, event)
 
     def _start_drag(self, index):
@@ -347,8 +335,6 @@ class MainWindow(QMainWindow):
     def _setup_table(self):
         self.table = DragTableWidget(1, 31)
         self.table.setShowGrid(False)
-        self.table.setSelectionMode(QTableWidget.NoSelection)
-        self.table.viewport().installEventFilter(self)
 
         # Disable cell selection highlight
         self.table.setSelectionMode(QTableWidget.NoSelection)
@@ -456,8 +442,6 @@ class MainWindow(QMainWindow):
     # -------------------------
     # LOGIC
     # -------------------------
-
-    FRENCH_DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
     
     def _update_headers(self):
         # CRITICAL, link backend to frontend
@@ -474,7 +458,7 @@ class MainWindow(QMainWindow):
         headers = []
         for day in range(1, days_in_month + 1):
             weekday_index = calendar.weekday(year, month, day)
-            weekday_short = self.FRENCH_DAYS[weekday_index]
+            weekday_short = self.table.FRENCH_DAYS[weekday_index]
             item = QTableWidgetItem((f"{weekday_short}\n{day}"))
             item.setTextAlignment(Qt.AlignCenter)
             self.table.setHorizontalHeaderItem(day - 1, item)
