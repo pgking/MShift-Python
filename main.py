@@ -17,8 +17,7 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QSpinBox,
     QFormLayout,
-    QColorDialog,
-    QMenu
+    QColorDialog
 )
 from PyQt5.QtGui import (
     QColor,
@@ -298,36 +297,8 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self.services.append(dialog.service)
 
-    def _open_cell_context_menu(self, position):
-        index = self.table.indexAt(position)
-
-        if not index.isValid():
-            return
-
-        row = index.row()
-        column = index.column()
-
-        # Ignore placeholder row
-        if row == 0 and self.table.verticalHeaderItem(row) is None:
-            return
-
-        # Check if there is actually a service assigned
-        person = self.people[row]
-        day = column + 1
-        service_id = self.current_month.get_service(person.id, day)
-
-        if service_id is None:
-            return  # nothing to delete
-
-        menu = QMenu(self)
-        clear_action = menu.addAction("Clear service")
-
-        action = menu.exec_(self.table.viewport().mapToGlobal(position))
-
-        if action == clear_action:
-            self._clear_cell(row, column)
-
     def _clear_cell(self, row, column):
+        print("Clearing cell")
         person = self.people[row]
         day = column + 1
 
@@ -336,6 +307,33 @@ class MainWindow(QMainWindow):
 
         # UI
         self.table.removeCellWidget(row, column)
+
+    def eventFilter(self, obj, event):
+        if obj is self.table.viewport():
+            if event.type() == event.MouseButtonPress:
+                if event.button() == Qt.RightButton:
+                    index = self.table.indexAt(event.pos())
+                    if not index.isValid():
+                        return True
+
+                    row = index.row()
+                    column = index.column()
+
+                    # Ignore placeholder row
+                    if row == 0 and self.table.verticalHeaderItem(row) is None:
+                        return True
+
+                    person = self.people[row]
+                    day = column + 1
+
+                    service_id = self.current_month.get_service(person.id, day)
+                    if service_id is not None:
+                        self._clear_cell(row, column)
+
+                    return True  # ⛔ consume the event
+
+        return super().eventFilter(obj, event)
+
 
 
 
@@ -373,8 +371,7 @@ class MainWindow(QMainWindow):
         # Disable cell selection highlight
         self.table.setSelectionMode(QTableWidget.NoSelection)
 
-        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self._open_cell_context_menu)
+        self.table.viewport().installEventFilter(self)
 
         # Keep headers interactive
         self.table.horizontalHeader().setSectionsClickable(True)
@@ -400,9 +397,14 @@ class MainWindow(QMainWindow):
 
     def _create_service_combo(self, row, column, preset_service = None):
         combo = QComboBox()
+        combo.setContextMenuPolicy(Qt.NoContextMenu)
         combo.setEditable(True)
-        combo.lineEdit().setReadOnly(True)
-        combo.lineEdit().setAlignment(Qt.AlignCenter)
+
+        line = combo.lineEdit()
+        line.setReadOnly(True)
+        line.setAlignment(Qt.AlignCenter)
+        line.setContextMenuPolicy(Qt.NoContextMenu)
+        line.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         combo.addItem("")
 
