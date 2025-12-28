@@ -162,17 +162,17 @@ class MonthData:
         self.year = year
         self.month = month
         # key : (person.id, day)
-        self.assignements = {}
+        self.assignments = {}
 
     def get_service(self, person_id, day):
-        return self.assignements.get((person_id, day))
+        return self.assignments.get((person_id, day))
 
     def set_service(self, person_id, day, service_id):
         if service_id is None :
-            self.assignements.pop((person_id, day), None)
+            self.assignments.pop((person_id, day), None)
         
         else :
-            self.assignements[(person_id, day)] = service_id
+            self.assignments[(person_id, day)] = service_id
 
 
 
@@ -399,12 +399,12 @@ class MainWindow(QMainWindow):
         combo = QComboBox()
         combo.setContextMenuPolicy(Qt.NoContextMenu)
         combo.setEditable(True)
+        combo.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         line = combo.lineEdit()
         line.setReadOnly(True)
         line.setAlignment(Qt.AlignCenter)
         line.setContextMenuPolicy(Qt.NoContextMenu)
-        line.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         combo.addItem("")
 
@@ -414,15 +414,29 @@ class MainWindow(QMainWindow):
         for service in self.services:
             combo.addItem(service.name)
 
+        def update_combo_style(service=None):
+            color = service.color_hex if service else "transparent"
+            combo.setStyleSheet(f"""
+                QComboBox {{
+                    background-color: {color};
+                    border: none;
+                    padding-left: 4px;
+                }}
+                QComboBox::drop-down {{
+                    width: 0px;
+                    border: none;
+                }}
+                QComboBox::down-arrow {{
+                    image: none;
+                }}
+            """)
+
+        update_combo_style()
+
         def on_service_selected(index):
             if index == 0:
                 self.current_month.set_service(person.id, day, None)
-                combo.setStyleSheet("""
-                    QComboBox {
-                        border: none;
-                        padding-left: 4px;
-                    }
-                """)
+                update_combo_style()
                 return
 
             service = self.services[index - 1]
@@ -436,16 +450,7 @@ class MainWindow(QMainWindow):
             combo.setItemText(index, service.short_name)
             combo.setCurrentIndex(index)
 
-            combo.setStyleSheet(f"""
-                QComboBox {{
-                    background-color: {service.color_hex};
-                    border: none;
-                    padding-left: 4px;
-                }}
-                QComboBox::drop-down {{
-                    border: none;
-                }}
-            """)
+            update_combo_style(service)
 
         combo.currentIndexChanged.connect(on_service_selected)
 
@@ -456,6 +461,7 @@ class MainWindow(QMainWindow):
                    break
 
         return combo
+
 
     def _ensure_combo(self, row, column) :
         combo = self.table.cellWidget(row, column)
