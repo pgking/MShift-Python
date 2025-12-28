@@ -3,6 +3,7 @@ import calendar
 import uuid
 
 from models import Person, Service, MonthData
+from dialogs import AddPersonDialog, AddServiceDialog
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -27,123 +28,6 @@ from PyQt5.QtGui import (
 )
 from PyQt5.QtCore import Qt
 
-
-# -------------------------
-# DATA CLASSES
-# -------------------------
-
-class AddPersonDialog(QDialog):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Add Person")
-        self.setFixedSize(300, 220)
-
-        layout = QFormLayout(self)
-
-        self.nom_edit = QLineEdit()
-        self.prenom_edit = QLineEdit()
-        self.display_edit = QLineEdit()
-        self.percent_spin = QSpinBox()
-        self.percent_spin.setRange(0, 100)
-        self.percent_spin.setValue(100)
-        self.percent_spin.stepBy(10)
-
-        layout.addRow("Nom : ", self.nom_edit)
-        layout.addRow("Prénom : ", self.prenom_edit)
-        layout.addRow("Affichage : ", self.display_edit)
-        layout.addRow("Pourcentage : ", self.percent_spin)
-
-        buttons_layout = QHBoxLayout()
-        self.create_btn = QPushButton("Créer")
-        self.cancel_btn = QPushButton("Annuler")
-
-        buttons_layout.addWidget(self.create_btn)
-        buttons_layout.addWidget(self.cancel_btn)
-        layout.addRow(buttons_layout)
-
-        self.create_btn.clicked.connect(self._on_create)
-        self.cancel_btn.clicked.connect(self.reject)
-
-        self.nom_edit.textChanged.connect(self._update_display)
-        self.prenom_edit.textChanged.connect(self._update_display)
-
-    def _update_display(self):
-        nom = self.nom_edit.text().strip()
-        prenom = self.prenom_edit.text().strip()
-
-        if nom and prenom :
-            self.display_edit.setText(f"{prenom[0].upper()}. {nom}")
-
-    def _on_create(self):
-        if not self.nom_edit.text() or not self.prenom_edit.text():
-            return #Warning popup later
-
-        self.person = Person(
-            FullName = f"{self.prenom_edit.text()} {self.nom_edit.text()}",
-            ShortName = self.display_edit.text(),
-            percentage = self.percent_spin.value()
-        )
-
-        self.accept()
-
-class AddServiceDialog(QDialog):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Add Service")
-        self.setFixedSize(300,240)
-
-        layout = QFormLayout(self)
-
-        self.name_edit = QLineEdit()
-        self.short_edit = QLineEdit()
-        self.hours_spin = QSpinBox()
-        self.hours_spin.setRange(6, 12)
-        self.hours_spin.setValue(12)
-
-        self.color_btn = QPushButton("Choisir couleur")
-        self.color = QColor("#FFFFFF")
-        self._update_color_button()
-
-        layout.addRow("Nom : ", self.name_edit)
-        layout.addRow("Affichage : ", self.short_edit)
-        layout.addRow("Heures : ", self.hours_spin)
-        layout.addRow("Couleur : ", self.color_btn)
-
-        buttons_layout = QHBoxLayout()
-        self.create_btn = QPushButton("Créer")
-        self.cancel_btn = QPushButton("Annuler")
-
-        buttons_layout.addWidget(self.create_btn)
-        buttons_layout.addWidget(self.cancel_btn)
-        layout.addRow(buttons_layout)
-
-        self.color_btn.clicked.connect(self._choose_color)
-        self.create_btn.clicked.connect(self._on_create)
-        self.cancel_btn.clicked.connect(self.reject)
-
-    def _choose_color(self):
-        color = QColorDialog.getColor(self.color, self)
-        if color.isValid():
-            self.color = color
-            self._update_color_button()
-
-    def _update_color_button(self):
-        self.color_btn.setStyleSheet(
-            f"background-color: {self.color.name()};"
-        )
-
-    def _on_create(self):
-        if not self.name_edit.text():
-            return
-
-        self.service = Service(
-            self.name_edit.text(),
-            self.short_edit.text(),
-            self.hours_spin.value(),
-            self.color.name()
-        )
-        self.accept()
-
 # -------------------------
 # MAIN WINDOW
 # -------------------------
@@ -154,6 +38,11 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("mshift – Midwife Scheduler")
         self.resize(1100, 600)
+
+        self._mouse_pressed_index = None
+        self._mouse_press_pos = None
+        self._dragging = False
+
 
         self.people = []
         self.services = [
@@ -175,7 +64,7 @@ class MainWindow(QMainWindow):
         self._setup_table()
         self._update_headers()
 
-        self._add_person_to_table(Person("Tiphaine Angibaud", "T. Angibaud", 100))
+        self._add_person_to_table(Person("Tiphaine",  "Angibaud", 100))
 
     def _populate_table_from_month(self):
         if not self.current_month:
@@ -278,33 +167,133 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, event):
         if obj is self.table.viewport():
-            if event.type() == event.MouseButtonPress:
-                if event.button() == Qt.RightButton:
-                    index = self.table.indexAt(event.pos())
-                    if not index.isValid():
-                        return True
+            # -----------------
+            # LEFT BUTTON PRESS
+            # -----------------
+            if event.type() == event.MouseButtonPress and event.button() == Qt.LeftButton:
+                index = self.table.indexAt(event.pos())
+                if not index.isValid():
+                    return True
 
-                    row = index.row()
-                    column = index.column()
+                self._mouse_pressed_index = index
+                self._mouse_press_pos = event.pos()
+                self._dragging = False
+                return True
 
-                    # Ignore placeholder row
-                    if row == 0 and self.table.verticalHeaderItem(row) is None:
-                        return True
+            # -------------
+            # MOUSE MOVE
+            # -------------
+            if event.type() == event.MouseMove:
+                if self._mouse_pressed_index is None:
+                    return False
 
-                    person = self.people[row]
-                    day = column + 1
+                if self._dragging:
+                    return True
 
-                    service_id = self.current_month.get_service(person.id, day)
-                    if service_id is not None:
-                        self._clear_cell(row, column)
+                distance = (event.pos() - self._mouse_press_pos).manhattanLength()
+                if distance > QApplication.startDragDistance():
+                    self._dragging = True
+                    self._start_drag(self._mouse_pressed_index)
+                    return True
 
-                    return True  # ⛔ consume the event
+            # -----------------
+            # LEFT BUTTON RELEASE
+            # -----------------
+            if event.type() == event.MouseButtonRelease and event.button() == Qt.LeftButton:
+                if self._mouse_pressed_index is None:
+                    return False
+
+                index = self._mouse_pressed_index
+
+                if self._dragging:
+                    self._handle_drop(index, event.pos())
+                else:
+                    self._open_cell_dropdown(index.row(), index.column())
+
+                self._mouse_pressed_index = None
+                self._mouse_press_pos = None
+                self._dragging = False
+                self._drag_source = None
+                return True   
+
+            # -----------------
+            # RIGHT CLICK (DELETE)
+            # -----------------
+            if event.type() == event.MouseButtonPress and event.button() == Qt.RightButton:
+                index = self.table.indexAt(event.pos())
+                if not index.isValid():
+                    return True
+
+                row = index.row()
+                column = index.column()
+
+                # Ignore placeholder row
+                if row == 0 and self.table.verticalHeaderItem(row) is None:
+                    return True
+
+                person = self.people[row]
+                day = column + 1
+
+                service_id = self.current_month.get_service(person.id, day)
+                if service_id is not None:
+                    self._clear_cell(row, column)
+
+                return True  # ⛔ consume the event
 
         return super().eventFilter(obj, event)
 
+    def _start_drag(self, index):
+        print("Drag start:", index.row(), index.column())
+        row = index.row()
+        col = index.column()
 
+        person = self.people[row]
+        day = col + 1
 
+        service_id = self.current_month.get_service(person.id, day)
 
+        if service_id is None :
+            return
+        
+        self._drag_source = (row, col, service_id)
+
+    def _handle_drop(self, source_index, pos):
+        if not hasattr(self, "_drag_source"):
+            return
+        
+        target = self.table.indexAt(pos)
+        if not target.isValid():
+            return
+        print("Drop:", source_index.row(), source_index.column(), "->", target.row(), target.column())
+        src_row, src_col, service_id = self._drag_source
+        tgt_row = target.row()
+        tgt_col = target.column()
+
+        # Same cell --> Do nothing
+        if src_row == tgt_row and src_col == tgt_col:
+            return
+
+        # Backend update
+        src_person = self.people[src_row]
+        tgt_person = self.people[tgt_row]
+
+        src_day = src_col + 1
+        tgt_day = tgt_col + 1
+
+        self.current_month.set_service(src_person.id, src_day, None)
+        self.current_month.set_service(tgt_person.id, tgt_day, service_id)
+
+        # UI update
+        self.table.removeCellWidget(src_row, src_col)
+
+        combo = self._create_service_combo(tgt_row, tgt_col, preset_service=service_id)
+        self.table.setCellWidget(tgt_row, tgt_col, combo)
+
+        del self._drag_source
+
+    def _open_cell_dropdown(self, row, column):
+        combo = self._ensure_combo(row, column)
+        combo.showPopup()
 
 
     # -------------------------
@@ -358,8 +347,6 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setStretchLastSection(True)
 
         self.table.verticalHeader().setMinimumWidth(80)
-
-        self.table.cellClicked.connect(self._on_cell_clicked)
 
         self.main_layout.addWidget(self.table)
 
@@ -489,20 +476,6 @@ class MainWindow(QMainWindow):
                 item = self.table.item(row, col)
                 if item is not None:
                     item.setBackground(QBrush())
-
-
-
-    def _on_cell_clicked(self, row, column):
-        # Ignore placeholder row
-        if row == 0 and self.table.verticalHeaderItem(row) is None:
-            return
-
-        combo = self._ensure_combo(row, column)
-        combo.showPopup()
-
-    
-
-        
 
 
 # -------------------------

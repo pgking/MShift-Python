@@ -10,11 +10,22 @@ class Service:
         self.color_hex = color_hex
 
 class Person:
-    def __init__(self, FullName, ShortName, percentage):
+    def __init__(self, prenom: str, nom: str, percentage: int, short_name: str | None = None):
         self.id = str(uuid.uuid4()) # Unique identifier
-        self.name = FullName
-        self.short_name = ShortName
+        self.prenom = prenom.strip()
+        self.nom = nom.strip()
         self.percentage = percentage
+        if short_name and short_name.strip() :
+            self.short_name = short_name.strip()
+        
+        else :
+            self.short_name = self._default_short_name()
+
+    def _default_short_name(self) -> str :
+        if not self.prenom :
+            return self.nom.title()
+        
+        return f"{self.prenom[0].upper()}. {self.nom.title()}"
 
 class MonthData:
     def __init__(self, year : int, month : int):
