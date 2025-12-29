@@ -277,6 +277,7 @@ class MainWindow(QMainWindow):
         target = self.table.indexAt(pos)
         if not target.isValid():
             return
+
         print("Drop:", source_index.row(), source_index.column(), "->", target.row(), target.column())
         src_row, src_col, service_id = self._drag_source
         tgt_row = target.row()
@@ -293,14 +294,36 @@ class MainWindow(QMainWindow):
         src_day = src_col + 1
         tgt_day = tgt_col + 1
 
-        self.current_month.set_service(src_person.id, src_day, None)
+        target_service_id = self.current_month.get_service(
+            tgt_person.id,
+            tgt_day
+        )
+
+        # Backend swap
+        self.current_month.set_service(src_person.id, src_day, target_service_id)
         self.current_month.set_service(tgt_person.id, tgt_day, service_id)
 
         # UI update
+        # Clear both cells
         self.table.removeCellWidget(src_row, src_col)
+        self.table.removeCellWidget(tgt_row, tgt_col)
 
-        combo = self._create_service_combo(tgt_row, tgt_col, preset_service=service_id)
-        self.table.setCellWidget(tgt_row, tgt_col, combo)
+        # Restore source cell if needed
+        if target_service_id is not None:
+            src_combo = self._create_service_combo(
+                src_row,
+                src_col,
+                preset_service=target_service_id
+            )
+            self.table.setCellWidget(src_row, src_col, src_combo)
+
+        # Set target cell
+        tgt_combo = self._create_service_combo(
+            tgt_row,
+            tgt_col,
+            preset_service=service_id
+        )
+        self.table.setCellWidget(tgt_row, tgt_col, tgt_combo)
 
         del self._drag_source
 
