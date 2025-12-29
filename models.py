@@ -1,20 +1,30 @@
 import uuid
+import json
 from typing import Optional, Dict
 from PyQt5.QtWidgets import QTableWidget
 from PyQt5.QtGui import QPainter, QPen, QColor
 from PyQt5.QtCore import Qt, QRect
 
 class Service:
-    def __init__(self, name, short_name, hours, color_hex):
-        self.id = str(uuid.uuid4()) # Unique identifier
+    def __init__(self, name, short_name, hours, color_hex, id=None):
+        self.id = id or str(uuid.uuid4()) # Unique identifier
         self.name = name
         self.short_name = short_name
         self.hours = hours
         self.color_hex = color_hex
 
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "short_name": self.short_name,
+            "hours": self.hours,
+            "color_hex": self.color_hex
+        }
+
 class Person:
-    def __init__(self, prenom: str, nom: str, percentage: int, short_name: str | None = None):
-        self.id = str(uuid.uuid4()) # Unique identifier
+    def __init__(self, prenom: str, nom: str, percentage: int, short_name: str | None = None, id=None):
+        self.id = id or str(uuid.uuid4()) # Unique identifier
         self.prenom = prenom.strip()
         self.nom = nom.strip()
         self.percentage = percentage
@@ -29,6 +39,15 @@ class Person:
             return self.nom.title()
         
         return f"{self.prenom[0].upper()}. {self.nom.title()}"
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "prenom": self.prenom,
+            "nom": self.nom,
+            "percentage": self.percentage,
+            "short_name": self.short_name
+        }
 
 class MonthData:
     def __init__(self, year : int, month : int):
@@ -46,6 +65,26 @@ class MonthData:
         
         else :
             self.assignments[(person_id, day)] = service_id
+
+    def to_dict(self):
+        return{
+            "year": self.year,
+            "month": self.month,
+            "assignments": {
+                f"{person_id}_{day}": service_id
+                for (person_id, day), service_id in self.assignments.items()
+            }
+        }
+
+    @staticmethod
+    def from_dict(data):
+        month = MonthData(data["year"], data["month"])
+        month.assignments = {
+            (pid, int(day)): service_id
+            for k, service_id in data["assignments"].items()
+            for pid, day in [k.split("_")]
+        }
+        return month
 
 class DragTableWidget(QTableWidget):
     def __init__(self, *args, **kwargs):

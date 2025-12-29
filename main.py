@@ -1,6 +1,7 @@
 import sys
 import calendar
 import uuid
+import json
 
 from models import Person, Service, MonthData, DragTableWidget
 from dialogs import AddPersonDialog, AddServiceDialog
@@ -20,7 +21,8 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QSpinBox,
     QFormLayout,
-    QColorDialog
+    QColorDialog,
+    QFileDialog
 )
 from PyQt5.QtGui import (
     QColor,
@@ -63,6 +65,7 @@ class MainWindow(QMainWindow):
 
         self.main_layout = QVBoxLayout(self.central_widget)
 
+        self._setup_save_load_buttons()
         self._setup_action_buttons()
         self._setup_controls()
         self._setup_table()
@@ -311,6 +314,25 @@ class MainWindow(QMainWindow):
     # UI SETUP
     # -------------------------
 
+    def _setup_save_load_buttons(self):
+        save_load_layout = QHBoxLayout()
+
+        self.save_btn = QLabel("💾 Save")
+        self.load_btn = QLabel("📂 Load")
+
+        for btn in [self.save_btn, self.load_btn]:
+            btn.setStyleSheet("padding: 6px; border: 1px solid #888; border-radius: 4px;")
+            btn.setAlignment(Qt.AlignCenter)
+
+        self.save_btn.mousePressEvent = lambda e: self.save_file()
+        self.load_btn.mousePressEvent = lambda e: self.load_file()
+
+        save_load_layout.addWidget(self.save_btn)
+        save_load_layout.addWidget(self.load_btn)
+
+        self.main_layout.addLayout(save_load_layout)
+        
+
     def _setup_controls(self):
         controls_layout = QHBoxLayout()
 
@@ -485,6 +507,62 @@ class MainWindow(QMainWindow):
                 item = self.table.item(row, col)
                 if item is not None:
                     item.setBackground(QBrush())
+
+    def _refresh_table(self):
+        # Reset the table
+        self.table.setRowCount(max(1, len(self.people)))
+
+        # Set vertical headers
+        for row, person in enumerate(self.people):
+            self.table.setVerticalHeaderItem(row, QTableWidgetItem(person.short_name))
+
+        # Reload the current month
+        self._update_headers()
+
+    def table_clear(self):
+        """Clears all table content but keeps the table widget itself."""
+        self.table.clear()  # Clears all items and headers
+        self.table.setRowCount(0)
+        self.table.setColumnCount(0)
+
+
+    def save_file(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Save Schedule", "", "MShift File (*.mshift)")
+        if not path:
+            return
+
+        data = {
+            "people": [p.to_dict() for p in self.people],
+            "services": [s.to_dict() for s in self.services],
+            "schedule": {
+                f"{year}_{month}": self.schedule[(year, month)].to_dict()
+                for year, month in self.schedule
+            }
+        }
+
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent = 2)
+
+    def load_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Load Schedule", "", "MShift Files (*.mshift)")
+        if not path:
+            return
+
+        with open (path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # Rebuild people and services
+        self.people = [Person(**p) for p in data["people"]]
+        self.services = [Service(**s) for s in data ["services"]]
+
+        # Rebuild Schedule
+        self.schedule = {}
+        for key, month_dict in data["schedule"].items():
+            self.schedule[tuple(map(int, key.split("_")))] = MonthData.from_dict(month_dict)
+
+        # Refresh UI
+        self.table_clear()
+        self._refresh_table()
 
 
 # -------------------------
