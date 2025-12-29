@@ -80,47 +80,18 @@ class MainWindow(QMainWindow):
         self._add_person_to_table(Person("Tiphaine",  "Angibaud", 100))
 
 
-    def _populate_table_from_month(self, prev_days=0):
-        if not self.current_month:
-            return
-
-        month = self.month_combo.currentIndex() + 1
-        year = int(self.year_combo.currentText())
-        prev_month = month - 1 if month > 1 else 12
-        prev_year = year if month > 1 else year - 1
-
-        # Ensure previous month monthData exists
-        prev_key = (prev_year, prev_month)
-        if prev_key not in self.schedule:
-            self.schedule[prev_key] = MonthData(prev_year, prev_month)
-
-        prev_month_data = self.schedule[prev_key]
-
+    def _populate_table_from_month(self):
         for row, person in enumerate(self.people):
             for col in range(self.table.columnCount()):
-                if col < prev_days:
-                    day = calendar.monthrange(prev_year, prev_month)[1] - prev_days + 1 + col
-                    month_data = prev_month_data
-
-                else:
-                    day = col - prev_days + 1
-                    month_data = self.current_month
-
+                self.table.removeCellWidget(row, col)
+                month_data, day = self._resolve_day_context(col)
                 service_id = month_data.get_service(person.id, day)
 
                 if service_id is None:
-                    self.table.removeCellWidget(row, day - 1)
                     continue
 
-                service = next(
-                    (s for s in self.services if s.id == service_id),
-                    None
-                )
-                if service is None:
-                    continue  # service was deleted later
-
-                combo = self._create_service_combo(row, day - 1, service_id)
-                self.table.setCellWidget(row, day - 1, combo)
+                combo = self._create_service_combo(row, col, service_id)
+                self.table.setCellWidget(row, col, combo)
 
 
     def _load_month(self):
@@ -130,8 +101,6 @@ class MainWindow(QMainWindow):
 
         if key not in self.schedule :
             self.schedule[key] = MonthData(year, month)
-
-        self.current_month = self.schedule[key]
 
     def _setup_action_buttons(self):
         buttons_layout = QHBoxLayout()
@@ -191,10 +160,10 @@ class MainWindow(QMainWindow):
     def _clear_cell(self, row, column):
         print("Clearing cell")
         person = self.people[row]
-        day = column + 1
+        month_data, day = self._resolve_day_context(column)
 
         # Backend
-        self.current_month.set_service(person.id, day, None)
+        month_data.set_service(person.id, day, None)
 
         # UI
         self.table.removeCellWidget(row, column)
@@ -271,9 +240,9 @@ class MainWindow(QMainWindow):
                     return True
 
                 person = self.people[row]
-                day = column + 1
+                month_data, day = self._resolve_day_context(column)
 
-                service_id = self.current_month.get_service(person.id, day)
+                service_id = month_data.get_service(person.id, day)
                 if service_id is not None:
                     self._clear_cell(row, column)
 
@@ -287,9 +256,9 @@ class MainWindow(QMainWindow):
         col = index.column()
 
         person = self.people[row]
-        day = col + 1
+        month_data, day = self._resolve_day_context(col)
 
-        service_id = self.current_month.get_service(person.id, day)
+        service_id = month_data.get_service(person.id, day)
 
         if service_id is None :
             return
@@ -317,17 +286,17 @@ class MainWindow(QMainWindow):
         src_person = self.people[src_row]
         tgt_person = self.people[tgt_row]
 
-        src_day = src_col + 1
-        tgt_day = tgt_col + 1
+        src_month_data, src_day = self._resolve_day_context(src_col)
+        tgt_month_data, tgt_day = self._resolve_day_context(tgt_col)
 
-        target_service_id = self.current_month.get_service(
+        target_service_id = tgt_month_data.get_service(
             tgt_person.id,
             tgt_day
         )
 
         # Backend swap
-        self.current_month.set_service(src_person.id, src_day, target_service_id)
-        self.current_month.set_service(tgt_person.id, tgt_day, service_id)
+        src_month_data.set_service(src_person.id, src_day, target_service_id)
+        tgt_month_data.set_service(tgt_person.id, tgt_day, service_id)
 
         # UI update
         # Clear both cells
@@ -449,7 +418,7 @@ class MainWindow(QMainWindow):
         combo.addItem("")
 
         person = self.people[row]
-        day = column + 1
+        month_data, day = self._resolve_day_context(column)
 
         for service in self.services:
             combo.addItem(service.name)
@@ -475,13 +444,13 @@ class MainWindow(QMainWindow):
 
         def on_service_selected(index):
             if index == 0:
-                self.current_month.set_service(person.id, day, None)
+                month_data.set_service(person.id, day, None)
                 update_combo_style()
                 return
 
             service = self.services[index - 1]
 
-            self.current_month.set_service(
+            month_data.set_service(
                 person.id,
                 day,
                 service.id
@@ -562,11 +531,10 @@ class MainWindow(QMainWindow):
         self._clear_cell_backgrounds()
 
         # Create headers
-        headers = []
-
         for col in range(total_days):
             if col < self.n_prev_days:
-                day = days_in_prev_month - self.n_prev_days + 1 + col
+                start_day = days_in_prev_month - self.n_prev_days + 1
+                day = start_day + col
                 display_month = prev_month
                 display_year = prev_year
 
@@ -583,7 +551,10 @@ class MainWindow(QMainWindow):
             if weekday_index >= 5:
                 self._shade_weekend_column(col)
 
-        self._populate_table_from_month(prev_days = self.n_prev_days)
+        self._populate_table_from_month()
+
+        # Reset scroll to beginning
+        self.table.horizontalScrollBar().setValue(0)
 
     def _shade_weekend_column(self, column):
         color = QColor(200, 200, 200, 120)
@@ -659,6 +630,26 @@ class MainWindow(QMainWindow):
         # Refresh UI
         self.table_clear()
         self._refresh_table()
+
+    def _resolve_day_context(self, column):
+        month = self.month_combo.currentIndex() + 1
+        year = int(self.year_combo.currentText())
+
+        prev_month = month - 1 if month > 1 else 12
+        prev_year = year if month > 1 else year - 1
+
+        if column < self.n_prev_days:
+            day = calendar.monthrange(prev_year, prev_month)[1] - self.n_prev_days + 1 + column
+            key = (prev_year, prev_month)
+
+        else:
+            day = column - self.n_prev_days + 1
+            key = (year, month)
+
+        if key not in self.schedule:
+            self.schedule[key] = MonthData(*key)
+
+        return self.schedule[key], day
 
 
 # -------------------------

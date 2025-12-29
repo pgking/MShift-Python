@@ -1,6 +1,7 @@
 import uuid
 import json
 from typing import Optional, Dict
+
 from PyQt5.QtWidgets import QTableWidget
 from PyQt5.QtGui import QPainter, QPen, QColor
 from PyQt5.QtCore import Qt, QRect
