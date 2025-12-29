@@ -5,6 +5,7 @@ import json
 
 from models import Person, Service, MonthData, DragTableWidget
 from dialogs import AddPersonDialog, AddServiceDialog
+from menu_bar import MenuBar
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -39,6 +40,9 @@ from PyQt5.QtCore import Qt
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        self.menu_bar = MenuBar(self)
+        self.setMenuBar(self.menu_bar)
 
         self.setWindowTitle("mshift – Midwife Scheduler")
         self.resize(1100, 600)
@@ -481,6 +485,22 @@ class MainWindow(QMainWindow):
             self.table.setCellWidget(row, column, combo)
 
         return combo
+
+    def quick_save(self):
+        print("Quick save triggered (not implemented yet)")
+        self.save_file()
+
+    def save_and_exit(self):
+        print("Save and exit triggered")
+        self.quick_save()
+        QApplication.quit()
+
+    def open_services_dialog(self):
+        print("Open services dialog (not implemented yet)")
+
+    def open_about_dialog(self):
+        print("Open about dialog (not implemented yet)")
+
 
 
 
