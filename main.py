@@ -122,6 +122,7 @@ class MainWindow(QMainWindow):
         self.add_person_btn.mousePressEvent = self._open_add_person
         self.add_service_btn.mousePressEvent = self._open_add_service
 
+        buttons_layout.addStretch()
         buttons_layout.addWidget(self.add_person_btn)
         buttons_layout.addWidget(self.add_service_btn)
         buttons_layout.addStretch()
@@ -345,8 +346,10 @@ class MainWindow(QMainWindow):
         self.save_btn.mousePressEvent = lambda e: self.save_file()
         self.load_btn.mousePressEvent = lambda e: self.load_file()
 
+        save_load_layout.addStretch()
         save_load_layout.addWidget(self.save_btn)
         save_load_layout.addWidget(self.load_btn)
+        save_load_layout.addStretch()
 
         self.main_layout.addLayout(save_load_layout)
         
@@ -376,6 +379,7 @@ class MainWindow(QMainWindow):
         self.year_combo.setCurrentText("2025")
         self.year_combo.currentIndexChanged.connect(self._update_headers)
 
+        controls_layout.addStretch()
         controls_layout.addWidget(QLabel("Month:"))
         controls_layout.addWidget(self.month_combo)
         controls_layout.addWidget(prev_btn)
