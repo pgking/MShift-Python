@@ -54,6 +54,7 @@ class MainWindow(QMainWindow):
         self._drag_rect = None
         self._drag_source = None
 
+        self.n_prev_days = 3
 
         self.people = []
         self.services = [
@@ -79,13 +80,33 @@ class MainWindow(QMainWindow):
         self._add_person_to_table(Person("Tiphaine",  "Angibaud", 100))
 
 
-    def _populate_table_from_month(self):
+    def _populate_table_from_month(self, prev_days=0):
         if not self.current_month:
             return
 
+        month = self.month_combo.currentIndex() + 1
+        year = int(self.year_combo.currentText())
+        prev_month = month - 1 if month > 1 else 12
+        prev_year = year if month > 1 else year - 1
+
+        # Ensure previous month monthData exists
+        prev_key = (prev_year, prev_month)
+        if prev_key not in self.schedule:
+            self.schedule[prev_key] = MonthData(prev_year, prev_month)
+
+        prev_month_data = self.schedule[prev_key]
+
         for row, person in enumerate(self.people):
-            for day in range(1, self.table.columnCount() + 1):
-                service_id = self.current_month.get_service(person.id, day)
+            for col in range(self.table.columnCount()):
+                if col < prev_days:
+                    day = calendar.monthrange(prev_year, prev_month)[1] - prev_days + 1 + col
+                    month_data = prev_month_data
+
+                else:
+                    day = col - prev_days + 1
+                    month_data = self.current_month
+
+                service_id = month_data.get_service(person.id, day)
 
                 if service_id is None:
                     self.table.removeCellWidget(row, day - 1)
@@ -530,22 +551,39 @@ class MainWindow(QMainWindow):
         month = self.month_combo.currentIndex() + 1
         year = int(self.year_combo.currentText())
 
+        prev_month = month - 1 if month > 1 else 12
+        prev_year = year if month > 1 else  year - 1
+        days_in_prev_month = calendar.monthrange(prev_year, prev_month)[1]
         days_in_month = calendar.monthrange(year, month)[1]
-        self.table.setColumnCount(days_in_month)
+
+        total_days = self.n_prev_days + days_in_month
+        self.table.setColumnCount(total_days)
 
         self._clear_cell_backgrounds()
 
+        # Create headers
         headers = []
-        for day in range(1, days_in_month + 1):
-            weekday_index = calendar.weekday(year, month, day)
+
+        for col in range(total_days):
+            if col < self.n_prev_days:
+                day = days_in_prev_month - self.n_prev_days + 1 + col
+                display_month = prev_month
+                display_year = prev_year
+
+            else :
+                day = col - self.n_prev_days + 1
+                display_month = month
+                display_year = year
+
+            weekday_index = calendar.weekday(display_year, display_month, day)
             weekday_short = self.table.FRENCH_DAYS[weekday_index]
             item = QTableWidgetItem((f"{weekday_short}\n{day}"))
             item.setTextAlignment(Qt.AlignCenter)
-            self.table.setHorizontalHeaderItem(day - 1, item)
+            self.table.setHorizontalHeaderItem(col, item)
             if weekday_index >= 5:
-                self._shade_weekend_column(day - 1)
+                self._shade_weekend_column(col)
 
-        self._populate_table_from_month()
+        self._populate_table_from_month(prev_days = self.n_prev_days)
 
     def _shade_weekend_column(self, column):
         color = QColor(200, 200, 200, 120)
