@@ -1,0 +1,63 @@
+{
+  "people": [
+    {
+      "id": "3a244007-9d1b-46e3-a16c-d1ddbf6f083b",
+      "prenom": "Tiphaine",
+      "nom": "Angibaud",
+      "percentage": 100,
+      "short_name": "T. Angibaud"
+    },
+    {
+      "id": "6d0d280f-6fef-4fbf-88ce-c082b3bf6654",
+      "prenom": "jhkb",
+      "nom": "lkj",
+      "percentage": 100,
+      "short_name": "J. Lkj"
+    }
+  ],
+  "services": [
+    {
+      "id": "80fe2eac-3be0-4115-9fd1-9a34120c6f2a",
+      "name": "Jour",
+      "short_name": "J",
+      "hours": 12,
+      "color_hex": "#A3D5FF"
+    },
+    {
+      "id": "f9abc3d4-8d25-474e-8b46-c9399321d97a",
+      "name": "Nuit",
+      "short_name": "N",
+      "hours": 12,
+      "color_hex": "#FFD6A3"
+    },
+    {
+      "id": "a4852006-e086-4fbf-ad79-ad02763e688e",
+      "name": "Planning Familial",
+      "short_name": "GP",
+      "hours": 8,
+      "color_hex": "#C3B1E1"
+    }
+  ],
+  "schedule": {
+    "2025_12": {
+      "year": 2025,
+      "month": 12,
+      "assignments": {
+        "6d0d280f-6fef-4fbf-88ce-c082b3bf6654_1": "80fe2eac-3be0-4115-9fd1-9a34120c6f2a",
+        "3a244007-9d1b-46e3-a16c-d1ddbf6f083b_2": "80fe2eac-3be0-4115-9fd1-9a34120c6f2a"
+      }
+    },
+    "2025_11": {
+      "year": 2025,
+      "month": 11,
+      "assignments": {
+        "3a244007-9d1b-46e3-a16c-d1ddbf6f083b_30": "80fe2eac-3be0-4115-9fd1-9a34120c6f2a"
+      }
+    },
+    "2025_10": {
+      "year": 2025,
+      "month": 10,
+      "assignments": {}
+    }
+  }
+}

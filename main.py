@@ -361,6 +361,16 @@ class MainWindow(QMainWindow):
         self.month_combo.setCurrentIndex(real_life_month - 1)
         self.month_combo.currentIndexChanged.connect(self._update_headers)
 
+        # Previous month button
+        prev_btn = QPushButton("◀")
+        prev_btn.setFixedWidth(32)
+        prev_btn.clicked.connect(self._go_to_previous_month)
+
+        # Next month button
+        next_btn = QPushButton("▶")
+        next_btn.setFixedWidth(32)
+        next_btn.clicked.connect(self._go_to_next_month)
+
         self.year_combo = QComboBox()
         self.year_combo.addItems([str(y) for y in range(2025, 2031)])
         self.year_combo.setCurrentText("2025")
@@ -368,6 +378,8 @@ class MainWindow(QMainWindow):
 
         controls_layout.addWidget(QLabel("Month:"))
         controls_layout.addWidget(self.month_combo)
+        controls_layout.addWidget(prev_btn)
+        controls_layout.addWidget(next_btn)
         controls_layout.addWidget(QLabel("Year:"))
         controls_layout.addWidget(self.year_combo)
         controls_layout.addStretch()
@@ -650,6 +662,28 @@ class MainWindow(QMainWindow):
             self.schedule[key] = MonthData(*key)
 
         return self.schedule[key], day
+    
+    def _go_to_previous_month(self):
+        month = self.month_combo.currentIndex()
+        year = int(self.year_combo.currentText())
+
+        if month == 0:
+            self.month_combo.setCurrentIndex(11)
+            self.year_combo.setCurrentText(str(year - 1))
+        else:
+            self.month_combo.setCurrentIndex(month - 1)
+
+
+    def _go_to_next_month(self):
+        month = self.month_combo.currentIndex()
+        year = int(self.year_combo.currentText())
+
+        if month == 11:
+            self.month_combo.setCurrentIndex(0)
+            self.year_combo.setCurrentText(str(year + 1))
+        else:
+            self.month_combo.setCurrentIndex(month + 1)
+
 
 
 # -------------------------
