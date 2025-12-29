@@ -15,6 +15,10 @@ class MenuBar(QMenuBar):
     def _create_file_menu(self):
         file_menu = self.addMenu("File")
 
+        new_action = QAction("New Schedule", self)
+        new_action.setShortcut(QKeySequence.New)
+        new_action.triggered.connect(self.parent.new_file)
+
         save_action = QAction("Save…", self)
         save_action.setShortcut(QKeySequence.Save)
         save_action.triggered.connect(self.parent.save_file)
@@ -34,6 +38,8 @@ class MenuBar(QMenuBar):
         save_exit_action.setShortcut(QKeySequence.Quit)
         save_exit_action.triggered.connect(self.parent.save_and_exit)
 
+        file_menu.addAction(new_action)
+        file_menu.addSeparator()
         file_menu.addAction(save_action)
         file_menu.addAction(quick_save_action)
         file_menu.addSeparator()

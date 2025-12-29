@@ -2,6 +2,7 @@ import sys
 import calendar
 import uuid
 import json
+from datetime import datetime
 
 from models import Person, Service, MonthData, DragTableWidget
 from dialogs import AddPersonDialog, AddServiceDialog
@@ -363,12 +364,15 @@ class MainWindow(QMainWindow):
     def _setup_controls(self):
         controls_layout = QHBoxLayout()
 
+        real_life_month = datetime.now().month
+
         self.month_combo = QComboBox()
         self.month_combo.addItems(calendar.month_name[1:])
+        self.month_combo.setCurrentIndex(real_life_month - 1)
         self.month_combo.currentIndexChanged.connect(self._update_headers)
 
         self.year_combo = QComboBox()
-        self.year_combo.addItems([str(y) for y in range(2024, 2031)])
+        self.year_combo.addItems([str(y) for y in range(2025, 2031)])
         self.year_combo.setCurrentText("2025")
         self.year_combo.currentIndexChanged.connect(self._update_headers)
 
@@ -500,6 +504,17 @@ class MainWindow(QMainWindow):
 
     def open_about_dialog(self):
         print("Open about dialog (not implemented yet)")
+
+    def new_file(self):
+        print("New file")
+
+        # Reset scheduling data only
+        self.schedule = {}
+        self.current_month = None
+
+        # Reflect UI
+        self.table_clear()
+        self._refresh_table()
 
 
 
