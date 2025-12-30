@@ -213,6 +213,7 @@ class MainWindow(QMainWindow):
         )
 
         self._update_headers()
+        self._refresh_table()
 
 
     def _open_add_person(self, event):
@@ -342,7 +343,7 @@ class MainWindow(QMainWindow):
         self._drag_source = (row, col, service_id)
 
     def _handle_drop(self, source_index, pos):
-        if not hasattr(self, "_drag_source"):
+        if not hasattr(self, "_drag_source") or self._drag_source is None:
             return
         
         target = self.table.indexAt(pos)
