@@ -595,9 +595,10 @@ class MainWindow(QMainWindow):
 
     def open_services_dialog(self):
         dialog = ManageServicesDialog(self.services)
-        dialog.exec()
 
-        self._refresh_table()
+        if dialog.exec_() == QDialog.Accepted:
+            self._rebuild_all_service_combos()
+            self._refresh_table()
 
     def open_about_dialog(self):
         print("Open about dialog (not implemented yet)")
@@ -767,6 +768,8 @@ class MainWindow(QMainWindow):
 
         # Refresh UI
         self.table_clear()
+        self._update_headers()
+        self._rebuild_all_service_combos()
         self._refresh_table()
 
     def _resolve_day_context(self, column):
@@ -863,6 +866,25 @@ class MainWindow(QMainWindow):
             self.year_combo.setCurrentText(str(year + 1))
         else:
             self.month_combo.setCurrentIndex(month + 1)
+
+    def _rebuild_all_service_combos(self):
+        for row, person in enumerate(self.people):
+            for col in range(self.table.columnCount()):
+                self.table.removeCellWidget(row, col)
+
+                month_data, day = self._resolve_day_context(col)
+                service_id = month_data.get_service(person.id, day)
+
+                if service_id is None:
+                    continue
+
+                combo = self._create_service_combo(
+                    row,
+                    col,
+                    preset_service=service_id
+                )
+                self.table.setCellWidget(row, col, combo)
+
 
 
 
