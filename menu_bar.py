@@ -34,6 +34,9 @@ class MenuBar(QMenuBar):
         self.recent_menu = QMenu("Load Recent", self)
         # Filled dynamically later
 
+        export_menu = QMenu("Export", self)
+        export_menu.addAction("Excel", self.parent.export_to_excel)
+
         save_exit_action = QAction("Save and Exit", self)
         save_exit_action.setShortcut(QKeySequence.Quit)
         save_exit_action.triggered.connect(self.parent.save_and_exit)
@@ -45,6 +48,8 @@ class MenuBar(QMenuBar):
         file_menu.addSeparator()
         file_menu.addAction(load_action)
         file_menu.addMenu(self.recent_menu)
+        file_menu.addSeparator()
+        file_menu.addMenu(export_menu)
         file_menu.addSeparator()
         file_menu.addAction(save_exit_action)
 
