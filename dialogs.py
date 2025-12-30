@@ -5,7 +5,10 @@ from PyQt5.QtWidgets import (
     QFormLayout,
     QPushButton,
     QHBoxLayout,
-    QColorDialog
+    QVBoxLayout,
+    QColorDialog,
+    QListWidget,
+    QWidget
 )
 from PyQt5.QtGui import QColor
 from PyQt5.QtCore import Qt
@@ -139,3 +142,156 @@ class AddServiceDialog(QDialog):
             self.color.name()
         )
         self.accept()
+
+class ManageServicesDialog(QDialog):
+    def __init__(self, services: list):
+        super().__init__()
+        self.setWindowTitle("Manage Services")
+        self.setFixedSize(600, 300)
+
+        self.services = services
+        self.current_service = None # Selected service
+
+        # MAIN LAYOUT
+        main_layout = QHBoxLayout(self)
+
+        # -------------------
+        # LEFT: SERVICE LIST
+        # -------------------
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+
+        self.service_list = QListWidget()
+        self._refresh_service_list()
+        self.service_list.currentRowChanged.connect(self._on_service_selected)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.create_btn = QPushButton("Create")
+        self.delete_btn = QPushButton("Delete")
+        btn_layout.addWidget(self.create_btn)
+        btn_layout.addWidget(self.delete_btn)
+
+        self.create_btn.clicked.connect(self._on_create)
+        self.delete_btn.clicked.connect(self._on_delete)
+
+        left_layout.addWidget(self.service_list)
+        left_layout.addLayout(btn_layout)
+
+        # -------------------
+        # RIGHT: EDITOR
+        # -------------------
+        right_widget = QWidget()
+        right_layout = QFormLayout(right_widget)
+
+        self.name_edit = QLineEdit()
+        self.short_edit = QLineEdit()
+        self.hours_spin = QSpinBox()
+        self.hours_spin.setRange(7, 12)
+        self.color_btn = QPushButton()
+        self.color = QColor("#FFFFFF")
+        self._update_color_button()
+        self.color_btn.clicked.connect(self._choose_color)
+
+        right_layout.addRow("Name", self.name_edit)
+        right_layout.addRow("Short name", self.short_edit)
+        right_layout.addRow("Hours", self.hours_spin)
+        right_layout.addRow("Color :", self.color_btn)
+
+        # Field focus out signal
+        self.name_edit.editingFinished.connect(self._update_service_from_fields)
+        self.short_edit.editingFinished.connect(self._update_service_from_fields)
+        self.hours_spin.editingFinished.connect(self._update_service_from_fields)
+
+        # -------------------
+        # BOTTOM OK BUTTON
+        # -------------------
+        self.ok_btn = QPushButton("Exit")
+        self.ok_btn.clicked.connect(self.accept)
+
+        # Add left layout and right layout to main layout
+        main_layout.addWidget(left_widget, 1)
+        main_layout.addWidget(right_widget, 2)
+        main_layout.addWidget(self.ok_btn, alignment=Qt.AlignBottom)
+
+    # -------------------
+    # METHODS
+    # -------------------
+    def _refresh_service_list(self):
+        self.service_list.clear()
+        for service in self.services:
+            self.service_list.addItem(service.name)
+
+    def _on_service_selected(self, index):
+        if index < 0 or index >= len(self.services):
+            self.current_service = None
+            self._clear_fields()
+            return
+
+        self.current_service = self.services[index]
+        self._populate_fields()
+
+    def _populate_fields(self):
+        s = self.current_service
+        if not s:
+            return
+
+        self.name_edit.setText(s.name)
+        self.short_edit.setText(s.short_name)
+        self.hours_spin.setValue(s.hours)
+        self.color = QColor(s.color_hex)
+        self._update_color_button()
+
+    def _clear_fields(self):
+        self.name_edit.setText("")
+        self.short_edit.setText("")
+        self.hours_spin.setValue(12)
+        self.color = QColor("#FFFFFF")
+        self._update_color_button()
+
+    def _update_service_from_fields(self):
+        if not self.current_service:
+            return
+        
+        s = self.current_service
+        s.name = self.name_edit.text()
+        s.short_name = self.short_edit.text()
+        s.hours = self.hours_spin.value()
+        s.color_hex = self.color.name()
+
+        # Refresh list to show name changes
+        self._refresh_service_list()
+
+        # Keep current service selected after refresh
+        idx = self.services.index(s)
+        self.service_list.setCurrentRow(idx)
+
+    def _choose_color(self):
+        color = QColorDialog.getColor(self.color, self)
+        if color.isValid():
+            self.color = color
+            self._update_color_button()
+            self._update_service_from_fields()
+
+    def _update_color_button(self):
+        self.color_btn.setStyleSheet(
+            f"background-color: {self.color.name()}; min-height: 30px;"
+        )
+
+    def _on_create(self):
+        dialog = AddServiceDialog()
+        if dialog.exec():
+            new_service = dialog.service
+            self.services.append(new_service)
+            self._refresh_service_list()
+            self.service_list.setCurrentRow(len(self.services) - 1)
+
+    def _on_delete(self):
+        if not self.current_service:
+            return
+
+        idx = self.services.index(self.current_service)
+        del self.services[idx]
+        self.current_service = None
+        self._refresh_service_list()
+        self._clear_fields()

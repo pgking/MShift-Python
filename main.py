@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 
 from models import Person, Service, MonthData, DragTableWidget
-from dialogs import AddPersonDialog, AddServiceDialog
+from dialogs import AddPersonDialog, AddServiceDialog, ManageServicesDialog
 from menu_bar import MenuBar
 
 from PyQt5.QtWidgets import (
@@ -594,7 +594,10 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def open_services_dialog(self):
-        print("Open services dialog (not implemented yet)")
+        dialog = ManageServicesDialog(self.services)
+        dialog.exec()
+
+        self._refresh_table()
 
     def open_about_dialog(self):
         print("Open about dialog (not implemented yet)")
