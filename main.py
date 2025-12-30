@@ -25,7 +25,8 @@ from PyQt5.QtWidgets import (
     QFormLayout,
     QColorDialog,
     QFileDialog,
-    QHeaderView
+    QHeaderView,
+    QMenu
 )
 from PyQt5.QtGui import (
     QColor,
@@ -68,6 +69,38 @@ class MonthlyWorkSummary:
     @property
     def ratio(self) -> float:
         return 0 if self.expected == 0 else self.worked / self.expected
+
+class ClickableHorizontalHeader(QHeaderView):
+    def __init__(self, main_window, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+        self.main_window = main_window
+        self.setSectionsClickable(True)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            col = self.logicalIndexAt(event.pos())
+            if col < 0:
+                return
+
+            month_data, day = self.main_window._resolve_day_context(col)
+
+            menu = QMenu()
+            if day in month_data.holidays:
+                menu.addAction("Enlever férié", lambda: self.toggle_holiday(col, month_data))
+            else:
+                menu.addAction("Rendre férié", lambda: self.toggle_holiday(col, month_data))
+
+            menu.exec_(self.mapToGlobal(event.pos()))
+        else:
+            super().mousePressEvent(event)
+
+    def toggle_holiday(self, col, month_data):
+        _, day = self.main_window._resolve_day_context(col)
+        month_data.toggle_holiday(day)
+        self.main_window._shade_holiday_column(col, month_data)
+        self.main_window._refresh_table()
+
+
 
 # -------------------------
 # MAIN WINDOW
@@ -290,23 +323,6 @@ class MainWindow(QMainWindow):
                     self._clear_cell(row, column)
 
                 return True  # ⛔ consume the event
-            
-        # -----------------
-        # HANDLE HEADER EVENTS
-        # -----------------
-        elif obj is self.table.horizontalHeader():
-            if event.type() == event.MouseButtonPress and event.button() == Qt.RightButton:
-                print("Right click on header")
-                pos = event.pos()
-                col = self.table.horizontalHeader().logicalIndexAt(pos)
-                if col < 0:  # safety
-                    return False
-
-                month_data, day = self._resolve_day_context(col)
-                month_data.toggle_holiday(day)  # toggle holiday for this day
-                self._shade_holiday_column(col, month_data)
-                self._refresh_table()  # update expected hours in vertical headers
-                return True
 
         return super().eventFilter(obj, event)
 
@@ -464,6 +480,11 @@ class MainWindow(QMainWindow):
         # Keep headers interactive
         self.table.horizontalHeader().setSectionsClickable(True)
         self.table.verticalHeader().setSectionsClickable(True)
+
+        header = ClickableHorizontalHeader(self, self.table)
+        self.table.setHorizontalHeader(header)
+        header.setSectionsClickable(True)
+
 
         self.table.horizontalHeader().setStyleSheet("""
             QHeaderView::section {
@@ -658,7 +679,7 @@ class MainWindow(QMainWindow):
             # If unmarked, clear background
             for row in range(self.table.rowCount()):
                 item = self.table.item(row, column)
-                if item is not None:
+                if item is None:
                     item = QTableWidgetItem()
                     self.table.setItem(row, column, item)
                 item.setBackground(QBrush())
