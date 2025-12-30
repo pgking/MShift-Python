@@ -56,6 +56,7 @@ class MonthData:
         self.month = month
         # key : (person.id, day)
         self.assignments = {}
+        self.holidays = set()
 
     def get_service(self, person_id, day):
         return self.assignments.get((person_id, day))
@@ -66,6 +67,12 @@ class MonthData:
         
         else :
             self.assignments[(person_id, day)] = service_id
+
+    def toggle_holiday(self, day: int):
+        if day in self.holidays:
+            self.holidays.remove(day)
+        else:
+            self.holidays.add(day)
 
     def to_dict(self):
         return{

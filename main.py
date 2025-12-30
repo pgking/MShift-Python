@@ -24,7 +24,8 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QFormLayout,
     QColorDialog,
-    QFileDialog
+    QFileDialog,
+    QHeaderView
 )
 from PyQt5.QtGui import (
     QColor,
@@ -32,7 +33,41 @@ from PyQt5.QtGui import (
     QPainter,
     QPen
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import (
+    Qt,
+    QRect
+)
+
+class ColoredVerticalHeader(QHeaderView):
+    def __init__(self, parent):
+        super().__init__(Qt.Vertical, parent)
+        self._row_colors = {}
+
+    def set_row_color(self, row, color):
+        self._row_colors[row] = color
+        self.viewport().update()
+
+    def paintSection(self, painter, rect, logicalIndex):
+        color = self._row_colors.get(logicalIndex)
+
+        if color:
+            painter.save()
+            painter.fillRect(rect, color)
+            painter.restore()
+        
+        painter.save()
+        painter.setBrush(Qt.NoBrush)
+        super().paintSection(painter, rect, logicalIndex)
+        painter.restore()
+
+class MonthlyWorkSummary:
+    def __init__(self, worked: float, expected: float):
+        self.worked = worked
+        self.expected = expected
+
+    @property
+    def ratio(self) -> float:
+        return 0 if self.expected == 0 else self.worked / self.expected
 
 # -------------------------
 # MAIN WINDOW
@@ -78,6 +113,7 @@ class MainWindow(QMainWindow):
         self._update_headers()
 
         self._add_person_to_table(Person("Tiphaine",  "Angibaud", 100))
+        self._refresh_table()
 
 
     def _populate_table_from_month(self):
@@ -168,9 +204,15 @@ class MainWindow(QMainWindow):
 
         # UI
         self.table.removeCellWidget(row, column)
+        self._refresh_table()
 
     def eventFilter(self, obj, event):
+
+        # -----------------
+        # HANDLE VIEWPORT EVENTS
+        # -----------------
         if obj is self.table.viewport():
+
             # -----------------
             # LEFT BUTTON PRESS
             # -----------------
@@ -226,7 +268,7 @@ class MainWindow(QMainWindow):
                 return True   
 
             # -----------------
-            # RIGHT CLICK (DELETE)
+            # RIGHT CLICK ON CELL (DELETE)
             # -----------------
             if event.type() == event.MouseButtonPress and event.button() == Qt.RightButton:
                 index = self.table.indexAt(event.pos())
@@ -248,6 +290,23 @@ class MainWindow(QMainWindow):
                     self._clear_cell(row, column)
 
                 return True  # ⛔ consume the event
+            
+        # -----------------
+        # HANDLE HEADER EVENTS
+        # -----------------
+        elif obj is self.table.horizontalHeader():
+            if event.type() == event.MouseButtonPress and event.button() == Qt.RightButton:
+                print("Right click on header")
+                pos = event.pos()
+                col = self.table.horizontalHeader().logicalIndexAt(pos)
+                if col < 0:  # safety
+                    return False
+
+                month_data, day = self._resolve_day_context(col)
+                month_data.toggle_holiday(day)  # toggle holiday for this day
+                self._shade_holiday_column(col, month_data)
+                self._refresh_table()  # update expected hours in vertical headers
+                return True
 
         return super().eventFilter(obj, event)
 
@@ -322,6 +381,7 @@ class MainWindow(QMainWindow):
         self.table.setCellWidget(tgt_row, tgt_col, tgt_combo)
 
         del self._drag_source
+        self._refresh_table()
 
     def _open_cell_dropdown(self, row, column):
         combo = self._ensure_combo(row, column)
@@ -399,6 +459,7 @@ class MainWindow(QMainWindow):
         self.table.setSelectionMode(QTableWidget.NoSelection)
 
         self.table.viewport().installEventFilter(self)
+        self.table.horizontalHeader().installEventFilter(self)
 
         # Keep headers interactive
         self.table.horizontalHeader().setSectionsClickable(True)
@@ -416,7 +477,10 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setHighlightSections(False)
         self.table.horizontalHeader().setStretchLastSection(True)
 
-        self.table.verticalHeader().setMinimumWidth(80)
+        header = ColoredVerticalHeader(self.table)
+        self.table.setVerticalHeader(header)
+        header.setMinimumWidth(80)
+        header.setStyleSheet("QHeaderView::section { background: transparent; }")
 
         self.main_layout.addWidget(self.table)
 
@@ -476,6 +540,8 @@ class MainWindow(QMainWindow):
             combo.setCurrentIndex(index)
 
             update_combo_style(service)
+
+            self._refresh_table()
 
         combo.currentIndexChanged.connect(on_service_selected)
 
@@ -584,6 +650,29 @@ class MainWindow(QMainWindow):
 
             item.setBackground(color)
 
+    def _shade_holiday_column(self, column, month_data):
+        color = QColor(200, 200, 200, 120)
+
+        _, day = self._resolve_day_context(column)
+        if day not in month_data.holidays:
+            # If unmarked, clear background
+            for row in range(self.table.rowCount()):
+                item = self.table.item(row, column)
+                if item is not None:
+                    item = QTableWidgetItem()
+                    self.table.setItem(row, column, item)
+                item.setBackground(QBrush())
+            return
+        
+        # Mark holiday
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, column)
+            if item is None :
+                item = QTableWidgetItem()
+                self.table.setItem(row, column, item)
+
+            item.setBackground(color)
+
     def _clear_cell_backgrounds(self):
         for row in range(self.table.rowCount()):
             for col in range(self.table.columnCount()):
@@ -595,16 +684,24 @@ class MainWindow(QMainWindow):
         # Reset the table
         self.table.setRowCount(max(1, len(self.people)))
 
+        month = self.month_combo.currentIndex() + 1
+        year = int(self.year_combo.currentText())
+
+        header = self.table.verticalHeader()
+
         # Set vertical headers
         for row, person in enumerate(self.people):
-            self.table.setVerticalHeaderItem(row, QTableWidgetItem(person.short_name))
+            summary = self.get_monthly_work_summary(person, year, month)
 
-        # Reload the current month
-        self._update_headers()
+            text = f"{person.short_name} ({int(summary.worked)}h / {int(summary.expected)}h)"
+            self.table.setVerticalHeaderItem(row, QTableWidgetItem(text))
+
+            color = self._hours_status_color(summary.ratio)
+            header.set_row_color(row, color)
 
     def table_clear(self):
         """Clears all table content but keeps the table widget itself."""
-        self.table.clear()  # Clears all items and headers
+        self.table.clearContents()  # Clears all items
         self.table.setRowCount(0)
         self.table.setColumnCount(0)
 
@@ -666,6 +763,60 @@ class MainWindow(QMainWindow):
             self.schedule[key] = MonthData(*key)
 
         return self.schedule[key], day
+    
+    def _expected_hours_for_month(self, person: Person, year: int, month: int) -> float:
+        # Working hours : (7 x number of week days in month x percentage) - (7 x holidays on week days)
+        weekdays = 0
+        days_in_month = calendar.monthrange(year, month)[1]
+
+        for day in range(1, days_in_month + 1):
+            if calendar.weekday(year, month, day) < 5:
+                weekdays += 1
+
+        base_hours = 7 * weekdays *(person.percentage / 100.0)
+
+        # Substract holidays
+        key = (year, month)
+        holidays = self.schedule.get(key).holidays if key in self.schedule else set()
+        holiday_hours = 7 * len(holidays)
+
+        return base_hours - holiday_hours
+    
+    def _worked_hours_for_person(self, person: Person, year: int, month: int) -> float:
+        key = (year, month)
+        if key not in self.schedule:
+            return 0.0
+        
+        month_data = self.schedule[key]
+        total_hours = 0.0
+
+        for day in range(1, calendar.monthrange(year, month)[1] + 1):
+            service_id = month_data.get_service(person.id, day)
+            if service_id is None:
+                continue
+
+            service = next((s for s in self.services if s.id == service_id), None)
+            if service:
+                total_hours += service.hours
+
+        return total_hours
+    
+    def _hours_status_color(self, ratio: float) -> QColor:
+        if ratio < 0.9:
+            return QColor(170, 200, 255)  # Light blue
+        
+        elif ratio > 1.1:
+            return QColor(255, 180, 180)  # Light red
+        
+        else:
+            return QColor(180, 230, 180)  # Light green
+        
+    def get_monthly_work_summary(self, person: Person, year: int, month: int) -> MonthlyWorkSummary:
+        return MonthlyWorkSummary(
+            worked=self._worked_hours_for_person(person, year, month),
+            expected=self._expected_hours_for_month(person, year, month)
+        )
+
     
     def _go_to_previous_month(self):
         month = self.month_combo.currentIndex()
