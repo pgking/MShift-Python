@@ -47,6 +47,8 @@ class ColoredVerticalHeader(QHeaderView):
         super().__init__(Qt.Vertical, parent)
         self._row_colors = {}
         self.main_window = main_window
+        self.setMouseTracking(True)
+        self._drop_indicator_row = None
 
     def set_row_color(self, row, color):
         self._row_colors[row] = color
@@ -65,14 +67,73 @@ class ColoredVerticalHeader(QHeaderView):
         super().paintSection(painter, rect, logicalIndex)
         painter.restore()
 
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        if self._drop_indicator_row is None:
+            return
+
+        painter = QPainter(self.viewport())
+        pen = QPen(QColor(50, 50, 50))
+        pen.setWidth(2)
+        painter.setPen(pen)
+
+        # Clamp index to valid range
+        index = min(self._drop_indicator_row, self.count() - 1)
+
+        y = self.sectionViewportPosition(index)
+
+        # If indicator is *after* last row, draw below it
+        if self._drop_indicator_row >= self.count():
+            y += self.sectionSize(index)
+
+        painter.drawLine(0, y, self.width(), y)
+
+
     def mousePressEvent(self, event):
-        index = self.logicalIndexAt(event.pos())
         if event.button() == Qt.LeftButton:
+            index = self.logicalIndexAt(event.pos())
             # Check if this is a person row
             if index >= 0 and self.main_window.rows[index]["type"] == "person":
                 self.main_window._row_dragging = True
                 self.main_window._row_drag_source = index
+                self.main_window._row_drag_target = index
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not self.main_window._row_dragging:
+            super().mouseMoveEvent(event)
+            return
+        
+        pos = event.pos()
+        index = self.logicalIndexAt(event.pos())
+        if index < 0:
+            self._drop_indicator_row = None
+            self.viewport().update()
+            return
+        
+        y = self.sectionViewportPosition(index)
+        h = self.sectionSize(index)
+        rect = QRect(0, y, self.width(), h)
+
+        # Decide if we are above or below the row
+        if pos.y() < rect.center().y():
+            self._drop_indicator_row = index
+            self.main_window._row_drag_target = index
+
+        else :
+            self._drop_indicator_row = index + 1
+            self.main_window._row_drag_target = index + 1
+        self.viewport().update()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self.main_window._row_dragging:
+            self.main_window._handle_row_drop()
+
+        self._drop_indicator_row = None
+        self.viewport().update()
+        super().mouseReleaseEvent(event)
 
 class MonthlyWorkSummary:
     def __init__(self, worked: float, expected: float):
@@ -140,6 +201,7 @@ class MainWindow(QMainWindow):
         # Person rows
         self._row_dragging = False
         self._row_drag_source = None
+        self._row_drag_target = None
 
         self.n_prev_days = 3
 
@@ -339,10 +401,6 @@ class MainWindow(QMainWindow):
                 self._drag_source = None
                 self.table.set_drag_rect(None)
                 self.table.viewport().update()
-                return True   
-
-            if event.type() == event.MouseButtonRelease and self._row_dragging:
-                self._handle_row_drop(event.pos())
                 return True
 
             # -----------------
@@ -378,6 +436,7 @@ class MainWindow(QMainWindow):
 
         row_data = self.rows[row]
         if row_data["type"] != "person":
+            print("Drag aborted: section row")
             return
 
         person_id = row_data["person_id"]
@@ -389,6 +448,7 @@ class MainWindow(QMainWindow):
         service_id = month_data.get_service(person.id, day)
 
         if service_id is None :
+            print("Drag aborted : empty cell")
             return
         
         self._drag_source = (person.id, col, service_id)
@@ -464,28 +524,44 @@ class MainWindow(QMainWindow):
         del self._drag_source
         self._refresh_visuals()
 
-    def _handle_row_drop(self, pos):
-        if not self._row_dragging or self._row_drag_source is None:
+    def _handle_row_drop(self):
+        if not self._row_dragging:
+            return
+        
+        source = self._row_drag_source
+        target = self._row_drag_target
+
+        if source is None or target is None or target == source:
+            self._reset_row_drag()
             return
 
-        target_row = self.table.rowAt(pos.y())
-        if target_row is None or target_row == self._row_drag_source:
-            return
+        # Get person rows only
+        person_rows = [i for i, r in enumerate(self.rows) if r["type"] == "person"]
+        source_person_index = person_rows.index(source)
 
-        # Make sure target is also a person row
-        if self.rows[target_row]["type"] != "person":
-            return
+        if target > person_rows[-1]:
+            insert_index = len(self.rows)
 
-        # Swap or move
-        row_data = self.rows.pop(self._row_drag_source)
-        self.rows.insert(target_row, row_data)
+        else:
+            insert_index = target
+            if target > source:
+                insert_index -= 1
+        
+        # Extract person row
+        person_row = self.rows.pop(source)
+        self.rows.insert(insert_index, person_row)
 
         # Reset dragging flags
-        self._row_dragging = False
-        self._row_drag_source = None
+        self._reset_row_drag()
 
         # Rebuild table
         self._rebuild_all()
+
+    def _reset_row_drag(self):
+        self._row_dragging = False
+        self._row_drag_source = None
+        self._row_drag_target = None
+
 
 
     def _open_cell_dropdown(self, row, column):
