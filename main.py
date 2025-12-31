@@ -172,7 +172,6 @@ class ClickableHorizontalHeader(QHeaderView):
         _, day = self.main_window._resolve_day_context(col)
         month_data.toggle_holiday(day)
         self.main_window._shade_holiday_column(col, month_data)
-        self.main_window._refresh_visuals()
 
 
 
@@ -536,23 +535,19 @@ class MainWindow(QMainWindow):
             return
 
         # Get person rows only
-        person_rows = [i for i, r in enumerate(self.rows) if r["type"] == "person"]
-        source_person_index = person_rows.index(source)
-
-        if target > person_rows[-1]:
-            insert_index = len(self.rows)
-
-        else:
-            insert_index = target
-            if target > source:
-                insert_index -= 1
-        
-        # Extract person row
         person_row = self.rows.pop(source)
+
+        insert_index = target
+        if target > source:
+            insert_index -= 1
+
         self.rows.insert(insert_index, person_row)
 
         # Reset dragging flags
         self._reset_row_drag()
+
+        # Clear vertical header colors
+        self.table.verticalHeader()._row_colors.clear()
 
         # Rebuild table
         self._rebuild_all()
@@ -669,6 +664,9 @@ class MainWindow(QMainWindow):
         self.table.setVerticalHeader(header)
         header.setMinimumWidth(80)
         header.setStyleSheet("QHeaderView::section { background: transparent; }")
+
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)
+        self.table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
 
         self.main_layout.addWidget(self.table)
 
@@ -810,28 +808,26 @@ class MainWindow(QMainWindow):
 
             item.setBackground(color)
 
-    def _shade_holiday_column(self, column, month_data):
+    def _shade_holiday_column(self, col, month_data):
         color = QColor(200, 200, 200, 120)
 
-        _, day = self._resolve_day_context(column)
-        if day not in month_data.holidays:
-            # If unmarked, clear background
-            for row in range(self.table.rowCount()):
-                item = self.table.item(row, column)
-                if item is None:
-                    item = QTableWidgetItem()
-                    self.table.setItem(row, column, item)
-                item.setBackground(QBrush())
-            return
-        
-        # Mark holiday
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, column)
-            if item is None :
-                item = QTableWidgetItem()
-                self.table.setItem(row, column, item)
+        _, day = self._resolve_day_context(col)
+        is_holiday = day in month_data.holidays
 
-            item.setBackground(color)
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, col)
+
+            if item is None:
+                item = QTableWidgetItem("")
+                item.setFlags(Qt.ItemIsEnabled)
+                self.table.setItem(row, col, item)
+
+            # Toggle holiday shading
+            if is_holiday:
+                item.setBackground(color)
+            
+            else:
+                item.setBackground(QBrush())
 
     def _clear_cell_backgrounds(self):
         for row in range(self.table.rowCount()):
@@ -1218,14 +1214,25 @@ class MainWindow(QMainWindow):
             color = self._hours_status_color(summary.ratio)
             header.set_row_color(row_index, color)
 
+    def _rebuild_holiday_shading(self):
+        month = self.month_combo.currentIndex() + 1
+        year = int(self.year_combo.currentText())
+        key = (year, month)
+        month_data = self.schedule.get(key)
+        if not month_data:
+            return
+
+        for day in month_data.holidays:
+            col = day + self.n_prev_days - 1
+            self._shade_holiday_column(col, month_data)
+
+
     # Use ONLY when table structure (month, year, people, file load) changes
     def _rebuild_all(self):
         self._rebuild_structure()
         self._rebuild_cells()
         self._refresh_visuals()
-
-
-
+        self._rebuild_holiday_shading()
 
 # -------------------------
 # APP ENTRY POINT
