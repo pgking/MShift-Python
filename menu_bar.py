@@ -35,7 +35,7 @@ class MenuBar(QMenuBar):
         # Filled dynamically later
 
         export_menu = QMenu("Export", self)
-        export_menu.addAction("Excel", self.parent.export_to_excel)
+        export_menu.addAction("Excel", self.parent.export_excel)
 
         save_exit_action = QAction("Save and Exit", self)
         save_exit_action.setShortcut(QKeySequence.Quit)
