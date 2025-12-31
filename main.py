@@ -43,9 +43,10 @@ from PyQt5.QtCore import (
 )
 
 class ColoredVerticalHeader(QHeaderView):
-    def __init__(self, parent):
+    def __init__(self, main_window, parent=None):
         super().__init__(Qt.Vertical, parent)
         self._row_colors = {}
+        self.main_window = main_window
 
     def set_row_color(self, row, color):
         self._row_colors[row] = color
@@ -63,6 +64,15 @@ class ColoredVerticalHeader(QHeaderView):
         painter.setBrush(Qt.NoBrush)
         super().paintSection(painter, rect, logicalIndex)
         painter.restore()
+
+    def mousePressEvent(self, event):
+        index = self.logicalIndexAt(event.pos())
+        if event.button() == Qt.LeftButton:
+            # Check if this is a person row
+            if index >= 0 and self.main_window.rows[index]["type"] == "person":
+                self.main_window._row_dragging = True
+                self.main_window._row_drag_source = index
+        super().mousePressEvent(event)
 
 class MonthlyWorkSummary:
     def __init__(self, worked: float, expected: float):
@@ -119,11 +129,17 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("mshift – Midwife Scheduler")
         self.resize(1100, 600)
 
+        # ---- Dragging setup
+        # Cells
         self._mouse_pressed_index = None
         self._mouse_press_pos = None
         self._dragging = False
         self._drag_rect = None
         self._drag_source = None
+
+        # Person rows
+        self._row_dragging = False
+        self._row_drag_source = None
 
         self.n_prev_days = 3
 
@@ -137,19 +153,36 @@ class MainWindow(QMainWindow):
         self.schedule = {} # key : (year, month) -> MonthData
         self.current_month = None
 
+        # ---- HARD CODED SECTIONS ----
+        # Theses will never be edited by user
+        self.sections = [
+            {"id": "PMSI", "label": "PMSI"},
+            {"id": "Suites", "label": "Suites de couches"},
+            {"id": "Patho", "label": "Grossesses pathologiques"},
+            {"id": "Cons", "label": "Consultations"},
+            {"id": "DAN", "label": "DAN"},
+            {"id": "PMA", "label": "PMA"},
+            {"id": "Salle", "label": "Salle de naissance"},
+            {"id": "Vac&Cong", "label": "Vacataires et congés"}
+        ]
+
+        # ---- CENTRAL WIDGET & LAYOUT
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
-
         self.main_layout = QVBoxLayout(self.central_widget)
+
+        # Ordered list of rows (sections + people)
+        self.rows = []
+        self._populate_initial_rows()
 
         self._setup_save_load_buttons()
         self._setup_action_buttons()
         self._setup_controls()
         self._setup_table()
-        self._rebuild_all()
 
         self._add_person_to_table(Person("Tiphaine",  "Angibaud", 100))
-        self._refresh_visuals()
+
+        self._rebuild_all()
 
 
     def _load_month(self):
@@ -159,6 +192,17 @@ class MainWindow(QMainWindow):
 
         if key not in self.schedule :
             self.schedule[key] = MonthData(year, month)
+
+    def _populate_initial_rows(self):
+        """Populate the ordered rows list with static sections.
+        People will be appended after this in self.rows."""
+        for section in self.sections:
+            self.rows.append({
+                "type": "section",
+                "id": section["id"],
+                "label": section["label"]
+            })
+
 
     def _setup_action_buttons(self):
         buttons_layout = QHBoxLayout()
@@ -187,8 +231,14 @@ class MainWindow(QMainWindow):
 
         self.main_layout.addLayout(buttons_layout)
 
+
     def _add_person_to_table(self, person: Person):
         self.people.append(person)
+
+        self.rows.append({
+            "type": "person",
+            "person_id": person.id
+        })
 
         if self.table.rowCount() == 1 and self.table.verticalHeaderItem(0) is None:
             row = 0
@@ -291,6 +341,10 @@ class MainWindow(QMainWindow):
                 self.table.viewport().update()
                 return True   
 
+            if event.type() == event.MouseButtonRelease and self._row_dragging:
+                self._handle_row_drop(event.pos())
+                return True
+
             # -----------------
             # RIGHT CLICK ON CELL (DELETE)
             # -----------------
@@ -322,15 +376,22 @@ class MainWindow(QMainWindow):
         row = index.row()
         col = index.column()
 
-        person = self.people[row]
-        month_data, day = self._resolve_day_context(col)
+        row_data = self.rows[row]
+        if row_data["type"] != "person":
+            return
 
+        person_id = row_data["person_id"]
+        person = next((p for p in self.people if p.id == person_id), None)
+        if person is None:
+            return
+
+        month_data, day = self._resolve_day_context(col)
         service_id = month_data.get_service(person.id, day)
 
         if service_id is None :
             return
         
-        self._drag_source = (row, col, service_id)
+        self._drag_source = (person.id, col, service_id)
 
     def _handle_drop(self, source_index, pos):
         if not hasattr(self, "_drag_source") or self._drag_source is None:
@@ -341,18 +402,30 @@ class MainWindow(QMainWindow):
             return
 
         print("Drop:", source_index.row(), source_index.column(), "->", target.row(), target.column())
-        src_row, src_col, service_id = self._drag_source
+        
         tgt_row = target.row()
         tgt_col = target.column()
 
+        # Ignore drops on section rows
+        row_data = self.rows[tgt_row]
+        if row_data["type"] != "person":
+            return
+
+        tgt_person_id = row_data["person_id"]
+        tgt_person = next((p for p in self.people if p.id == tgt_person_id), None)
+        if tgt_person is None:
+            return
+
+        src_person_id, src_col, service_id = self._drag_source
+        src_person = next((p for p in self.people if p.id == src_person_id), None)
+        if src_person is None:
+            return
+
         # Same cell --> Do nothing
-        if src_row == tgt_row and src_col == tgt_col:
+        if src_person_id == tgt_person_id and src_col == tgt_col:
             return
 
         # Backend update
-        src_person = self.people[src_row]
-        tgt_person = self.people[tgt_row]
-
         src_month_data, src_day = self._resolve_day_context(src_col)
         tgt_month_data, tgt_day = self._resolve_day_context(tgt_col)
 
@@ -367,6 +440,7 @@ class MainWindow(QMainWindow):
 
         # UI update
         # Clear both cells
+        src_row = next(i for i, r in enumerate(self.rows) if r.get("person_id") == src_person_id)
         self.table.removeCellWidget(src_row, src_col)
         self.table.removeCellWidget(tgt_row, tgt_col)
 
@@ -390,8 +464,34 @@ class MainWindow(QMainWindow):
         del self._drag_source
         self._refresh_visuals()
 
+    def _handle_row_drop(self, pos):
+        if not self._row_dragging or self._row_drag_source is None:
+            return
+
+        target_row = self.table.rowAt(pos.y())
+        if target_row is None or target_row == self._row_drag_source:
+            return
+
+        # Make sure target is also a person row
+        if self.rows[target_row]["type"] != "person":
+            return
+
+        # Swap or move
+        row_data = self.rows.pop(self._row_drag_source)
+        self.rows.insert(target_row, row_data)
+
+        # Reset dragging flags
+        self._row_dragging = False
+        self._row_drag_source = None
+
+        # Rebuild table
+        self._rebuild_all()
+
+
     def _open_cell_dropdown(self, row, column):
         combo = self._ensure_combo(row, column)
+        if combo is None:
+            return
         combo.showPopup()
 
 
@@ -489,7 +589,7 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setHighlightSections(False)
         self.table.horizontalHeader().setStretchLastSection(True)
 
-        header = ColoredVerticalHeader(self.table)
+        header = ColoredVerticalHeader(main_window=self, parent=self.table)
         self.table.setVerticalHeader(header)
         header.setMinimumWidth(80)
         header.setStyleSheet("QHeaderView::section { background: transparent; }")
@@ -497,6 +597,11 @@ class MainWindow(QMainWindow):
         self.main_layout.addWidget(self.table)
 
     def _create_service_combo(self, row, column, preset_service = None):
+        # Only allow combo for person rows
+        row_data = self.rows[row]
+        if row_data["type"] != "person":
+            return None # <-- Do nothing for sections
+
         combo = QComboBox()
         combo.setContextMenuPolicy(Qt.NoContextMenu)
         combo.setEditable(True)
@@ -509,7 +614,10 @@ class MainWindow(QMainWindow):
 
         combo.addItem("")
 
-        person = self.people[row]
+        person = next((p for p in self.people if p.id  == row_data["person_id"]), None)
+        if person is None:
+            return combo # Fallback, should not happen
+
         month_data, day = self._resolve_day_context(column)
 
         for service in self.services:
@@ -570,7 +678,8 @@ class MainWindow(QMainWindow):
         combo = self.table.cellWidget(row, column)
         if combo is None :
             combo = self._create_service_combo(row, column)
-            self.table.setCellWidget(row, column, combo)
+            if combo :
+                self.table.setCellWidget(row, column, combo)
 
         return combo
 
@@ -795,6 +904,23 @@ class MainWindow(QMainWindow):
         else:
             self.month_combo.setCurrentIndex(month + 1)
 
+    def _build_section_row(self, row_index: int, label: str):
+        item = QTableWidgetItem(label)
+        item.setFlags(Qt.ItemIsEnabled)
+        item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        font = item.font()
+        font.setBold(True)
+        item.setFont(font)
+
+        self.table.setVerticalHeaderItem(row_index, item)
+
+        for col in range(self.table.columnCount()):
+            cell = QTableWidgetItem("")
+            cell.setFlags(Qt.ItemIsEnabled)
+            self.table.setItem(row_index, col, cell)
+
+
     def export_to_excel(self):
         month = self.month_combo.currentIndex() + 1
         year = int(self.year_combo.currentText())
@@ -934,7 +1060,7 @@ class MainWindow(QMainWindow):
         self._load_month()
         
         # Reset the table
-        self.table.setRowCount(max(1, len(self.people)))
+        self.table.setRowCount(max(1, len(self.rows)))
 
         month = self.month_combo.currentIndex() + 1
         year = int(self.year_combo.currentText())
@@ -974,9 +1100,13 @@ class MainWindow(QMainWindow):
         self.table.horizontalScrollBar().setValue(0)
 
     def _rebuild_cells(self):
-        for row, person in enumerate(self.people):
+        for row_index, row_data in enumerate(self.rows):
+            if row_data["type"] != "person":
+                continue
+
+            person = next(p for p in self.people if p.id == row_data["person_id"])
             for col in range(self.table.columnCount()):
-                self.table.removeCellWidget(row, col)
+                self.table.removeCellWidget(row_index, col)
 
                 month_data, day = self._resolve_day_context(col)
                 service_id = month_data.get_service(person.id, day)
@@ -985,11 +1115,11 @@ class MainWindow(QMainWindow):
                     continue
 
                 combo = self._create_service_combo(
-                    row,
+                    row_index,
                     col,
                     preset_service=service_id
                 )
-                self.table.setCellWidget(row, col, combo)
+                self.table.setCellWidget(row_index, col, combo)
 
     def _refresh_visuals(self):
         month = self.month_combo.currentIndex() + 1
@@ -998,14 +1128,19 @@ class MainWindow(QMainWindow):
         header = self.table.verticalHeader()
 
         # Set vertical headers
-        for row, person in enumerate(self.people):
+        for row_index, row_data in enumerate(self.rows):
+            if row_data["type"] == "section":
+                self._build_section_row(row_index, row_data["label"])
+                continue
+
+            person = next(p for p in self.people if p.id == row_data["person_id"])
             summary = self.get_monthly_work_summary(person, year, month)
 
             text = f"{person.short_name} ({int(summary.worked)}h / {int(summary.expected)}h)"
-            self.table.setVerticalHeaderItem(row, QTableWidgetItem(text))
+            self.table.setVerticalHeaderItem(row_index, QTableWidgetItem(text))
 
             color = self._hours_status_color(summary.ratio)
-            header.set_row_color(row, color)
+            header.set_row_color(row_index, color)
 
     # Use ONLY when table structure (month, year, people, file load) changes
     def _rebuild_all(self):
