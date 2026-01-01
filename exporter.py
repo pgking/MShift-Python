@@ -45,7 +45,7 @@ def export_to_excel(self):
         total_days = days_in_month + self.n_prev_days
         start_col = self.n_prev_days
 
-        # Row 1 days short names
+        # Row 1 days' short names
         for col in range(start_col, total_days):
             month_data, day = self._resolve_day_context(col)
 
@@ -88,7 +88,7 @@ def export_to_excel(self):
 
             fill = holiday_fill if is_holiday else weekend_fill
 
-            for row in range(first_data_row, last_data_row + 1):
+            for row in range(1, last_data_row + 1):
                 ws.cell(row=row, column=excel_col).fill = fill
 
 
@@ -98,15 +98,40 @@ def export_to_excel(self):
         # Fill rows with services
         for row_idx, person in enumerate(self.people, start=2):
             # Column A: short_name
-            ws.cell(row=row_idx + 1, column=1, value=person.short_name)
+            short_name = f"{person.short_name}  {person.percentage if person.percentage != 100 else ''}%"
+            ws.cell(row=row_idx + 1, column=1, value=short_name)
 
             # Column B : worked hours ratio
             worked_hours = self._worked_hours_for_person(person, year, month)
             total_hours = self._expected_hours_for_month(person, year, month)
-            ratio = f"{int(worked_hours)}h / {int(total_hours)}h"
-            cell = ws.cell(row=row_idx + 1, column=2, value=ratio)
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            max_ratio_length = max(max_ratio_length, len(ratio))
+
+            ratio_float = 0 if total_hours == 0 else worked_hours / total_hours
+            ratio_str = f"{int(worked_hours)}h / {int(total_hours)}h"
+
+            cell_b = ws.cell(row=row_idx + 1, column=2, value=ratio_str)
+            cell_b.alignment = Alignment(horizontal="center", vertical="center")
+
+            # ----- CONDITIONAL FORMATTING -----
+            if ratio_float < 0.9:
+                fill_color = "ADD8FF"  # Light Blue
+            elif ratio_float > 1.1:
+                fill_color = "FFB4B4"  # Light Red
+            else:
+                fill_color = "B4E6B4"  # Light Green
+
+
+            ws.cell(row=row_idx + 1, column=1).fill = PatternFill(
+                start_color=fill_color,
+                end_color=fill_color,
+                fill_type="solid"
+            )
+            cell_b.fill = PatternFill(
+                start_color=fill_color,
+                end_color=fill_color,
+                fill_type="solid"
+            )
+
+            max_ratio_length = max(max_ratio_length, len(ratio_str))
 
             for col_offset, col in enumerate(range(start_col, total_days)):
                 month_data, day = self._resolve_day_context(col)

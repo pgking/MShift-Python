@@ -206,18 +206,6 @@ class MainWindow(QMainWindow):
             self._rebuild_cells()
             self._refresh_visuals()
 
-    def _clear_cell(self, row, column):
-        print("Clearing cell")
-        person = self.people[row]
-        month_data, day = self._resolve_day_context(column)
-
-        # Backend
-        month_data.set_service(person.id, day, None)
-
-        # UI
-        self.table.removeCellWidget(row, column)
-        self._refresh_visuals()
-
     def eventFilter(self, obj, event):
 
         # -----------------
@@ -308,12 +296,25 @@ class MainWindow(QMainWindow):
                 if row == 0 and self.table.verticalHeaderItem(row) is None:
                     return True
 
-                person = self.people[row]
+                # Ignore section rows
+                row_data = self.rows[row]
+                if row_data["type"] != "person":
+                    return True
+                
+                person = next((p for p in self.people if p.id == row_data["person_id"]), None)
+                if person is None:
+                    return True
+                
                 month_data, day = self._resolve_day_context(column)
 
                 service_id = month_data.get_service(person.id, day)
                 if service_id is not None:
-                    self._clear_cell(row, column)
+                    # Backend removal
+                    month_data.set_service(person.id, day, None)
+
+                    # UI update
+                    self.table.removeCellWidget(row, column)
+                    self._refresh_visuals()
 
                 return True  # ⛔ consume the event
 
@@ -425,6 +426,8 @@ class MainWindow(QMainWindow):
             self._reset_row_drag()
             return
 
+        self._clear_row_widgets(source)
+
         # Get person rows only
         person_row = self.rows.pop(source)
 
@@ -487,6 +490,7 @@ class MainWindow(QMainWindow):
         controls_layout = QHBoxLayout()
 
         real_life_month = datetime.now().month
+        real_life_year = datetime.now().year
 
         self.month_combo = QComboBox()
         self.month_combo.addItems(calendar.month_name[1:])
@@ -505,7 +509,7 @@ class MainWindow(QMainWindow):
 
         self.year_combo = QComboBox()
         self.year_combo.addItems([str(y) for y in range(2025, 2031)])
-        self.year_combo.setCurrentText("2025")
+        self.year_combo.setCurrentText(f"{real_life_year}")
         self.year_combo.currentIndexChanged.connect(self._rebuild_all)
 
         controls_layout.addStretch()
@@ -522,7 +526,7 @@ class MainWindow(QMainWindow):
 
     def _setup_table(self):
         self.table = DragTableWidget(1, 31)
-        self.table.setShowGrid(False)
+        self.table.setShowGrid(True)
 
         # Disable cell selection highlight
         self.table.setSelectionMode(QTableWidget.NoSelection)
@@ -727,6 +731,12 @@ class MainWindow(QMainWindow):
                 if item is not None:
                     item.setBackground(QBrush())
 
+    def _clear_row_widgets(self, row_index):
+        for col in range(self.table.columnCount()):
+            widget = self.table.cellWidget(row_index, col)
+            if widget:
+                self.table.removeCellWidget(row_index, col)
+
     def table_clear(self):
         """Clears all table content but keeps the table widget itself."""
         self.table.clearContents()  # Clears all items
@@ -742,6 +752,7 @@ class MainWindow(QMainWindow):
         data = {
             "people": [p.to_dict() for p in self.people],
             "services": [s.to_dict() for s in self.services],
+            "rows": self.rows,
             "schedule": {
                 f"{year}_{month}": self.schedule[(year, month)].to_dict()
                 for year, month in self.schedule
@@ -751,17 +762,28 @@ class MainWindow(QMainWindow):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent = 2)
 
+    def to_dict(self):
+        return{
+            "year": self.year,
+            "month": self.month,
+            "holidays": list(self.holidays),
+            "services": self.services_data
+        }
+
     def load_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load Schedule", "", "MShift Files (*.mshift)")
         if not path:
             return
 
-        with open (path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         # Rebuild people and services
         self.people = [Person(**p) for p in data["people"]]
         self.services = [Service(**s) for s in data ["services"]]
+
+        # Rebuild row (sections and ordering)
+        self.rows = data.get("rows", [])
 
         # Rebuild Schedule
         self.schedule = {}
@@ -771,6 +793,12 @@ class MainWindow(QMainWindow):
         # Refresh UI
         self.table_clear()
         self._rebuild_all()
+
+    def from_dict(cls, data):
+        obj = cls(data["year"], data["month"])
+        obj.holidays = set(data.get("holidays", []))
+        obj.services_data = data.get("services", {})
+        return obj
 
     def _resolve_day_context(self, column):
         month = self.month_combo.currentIndex() + 1
