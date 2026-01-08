@@ -443,8 +443,14 @@ class MainWindow(QMainWindow):
         # Clear vertical header colors
         self.table.verticalHeader()._row_colors.clear()
 
-        # Rebuild table
-        self._rebuild_all()
+        # Rebuild rows
+        start = min(source, insert_index)
+        end = max(source, insert_index)
+        for row in range(start, end + 1):
+            self._rebuild_row(row)
+
+        self._refresh_all_row_colors()
+
 
     def _reset_row_drag(self):
         self._row_dragging = False
@@ -959,6 +965,39 @@ class MainWindow(QMainWindow):
 
         # Reset scroll to beginning
         self.table.horizontalScrollBar().setValue(0)
+
+    def _rebuild_row(self, row_index):
+        row_data = self.rows[row_index]
+        if row_data["type"] != "person":
+            return
+        
+        person = next(p for p in self.people if p.id == row_data["person_id"])
+        month = self.month_combo.currentIndex() + 1
+        year = int(self.year_combo.currentText())
+
+        summary = self.get_monthly_work_summary(person, year, month)
+
+        text = f"{person.short_name} ({int(summary.worked)}h / {int(summary.expected)}h)"
+        self.table.setVerticalHeaderItem(row_index, QTableWidgetItem(text))
+
+        color = self._hours_status_color(summary.ratio)
+        self.table.verticalHeader().set_row_color(row_index, color)
+
+    def _refresh_all_row_colors(self):
+        for row_index, row_data in enumerate(self.rows):
+            if row_data["type"] != "person":
+                continue
+
+            person = next(p for p in self.people if p.id == row_data["person_id"])
+            month = self.month_combo.currentIndex() + 1
+            year = int(self.year_combo.currentText())
+
+            summary = self.get_monthly_work_summary(person, year, month)
+            color = self._hours_status_color(summary.ratio)
+
+            self.table.verticalHeader().set_row_color(row_index, color)
+
+
 
     def _rebuild_cells(self):
         for row_index, row_data in enumerate(self.rows):
