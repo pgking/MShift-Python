@@ -1,6 +1,6 @@
 from PyQt5.QtCore import Qt, QRect
 from PyQt5.QtWidgets import QHeaderView, QMenu, QTableWidgetItem
-from PyQt5.QtGui import QPainter, QPen, QColor
+from PyQt5.QtGui import QPainter, QPen, QColor, QBrush
 
 class ColoredVerticalHeader(QHeaderView):
     def __init__(self, main_window, parent=None):
@@ -122,4 +122,8 @@ class ClickableHorizontalHeader(QHeaderView):
     def toggle_holiday(self, col, month_data):
         _, day = self.main_window._resolve_day_context(col)
         month_data.toggle_holiday(day)
-        self.main_window._shade_holiday_column(col, month_data)
+
+        # Only shade one column
+        is_holiday = day in month_data.holidays
+        color = QColor(200, 200, 200) if is_holiday else QBrush()
+        self.main_window._shade_column_background(col, color)

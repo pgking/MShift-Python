@@ -698,37 +698,27 @@ class MainWindow(QMainWindow):
     # SHADERS
 
     def _shade_weekend_column(self, column):
-        color = QColor(200, 200, 200, 120)
+        color = QColor(200, 200, 200)
 
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, column)
-
-            if item is None :
-                item = QTableWidgetItem()
-                self.table.setItem(row, column, item)
-
-            item.setBackground(color)
+        self._shade_column_background(column, color)
 
     def _shade_holiday_column(self, col, month_data):
-        color = QColor(200, 200, 200, 120)
-
         _, day = self._resolve_day_context(col)
         is_holiday = day in month_data.holidays
 
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, col)
+        color = QColor(200, 200, 200) if is_holiday else QBrush()
 
+        self._shade_column_background(col, color)
+
+    def _shade_column_background(self, column, color: QColor):
+        # Shade a single column without refreshing everything
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, column)
             if item is None:
                 item = QTableWidgetItem("")
                 item.setFlags(Qt.ItemIsEnabled)
-                self.table.setItem(row, col, item)
-
-            # Toggle holiday shading
-            if is_holiday:
-                item.setBackground(color)
-            
-            else:
-                item.setBackground(QBrush())
+                self.table.setItem(row, column, item)
+            item.setBackground(color) 
 
     def _clear_cell_backgrounds(self):
         for row in range(self.table.rowCount()):
@@ -940,9 +930,11 @@ class MainWindow(QMainWindow):
         total_days = self.n_prev_days + days_in_month
         self.table.setColumnCount(total_days)
 
+
+        # CLear baclgrounds
         self._clear_cell_backgrounds()
 
-        # Create headers
+        # Create horizontal headers + shading
         for col in range(total_days):
             if col < self.n_prev_days:
                 start_day = days_in_prev_month - self.n_prev_days + 1
@@ -960,6 +952,8 @@ class MainWindow(QMainWindow):
             item = QTableWidgetItem((f"{weekday_short}\n{day}"))
             item.setTextAlignment(Qt.AlignCenter)
             self.table.setHorizontalHeaderItem(col, item)
+
+            # Shade only weekends
             if weekday_index >= 5:
                 self._shade_weekend_column(col)
 
@@ -1057,9 +1051,14 @@ class MainWindow(QMainWindow):
 
     # Use ONLY when table structure (month, year, people, file load) changes
     def _rebuild_all(self):
+        # Rebuild table structure + weekend shading
         self._rebuild_structure()
+
+        # Rebuild all person rows (vertical headers + combo)
         self._rebuild_cells()
-        self._refresh_visuals()
+        self._refresh_all_row_colors()
+
+        # Shade holiday  columns (over weekends if necessary)
         self._rebuild_holiday_shading()
 
 # -------------------------
