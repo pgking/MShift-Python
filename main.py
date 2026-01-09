@@ -10,6 +10,7 @@ from dialogs import AddPersonDialog, AddServiceDialog, ManageServicesDialog
 from menu_bar import MenuBar
 from headers import ColoredVerticalHeader, ClickableHorizontalHeader
 from exporter import export_to_excel
+from file_io import save_schedule, load_schedule
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -120,7 +121,38 @@ class MainWindow(QMainWindow):
 
         self._add_person_to_table(Person("Tiphaine",  "Angibaud", 100))
 
-        self._rebuild_all()
+        self.finalize_table_setup()
+
+    def finalize_table_setup(self):
+        """
+        Called once after any structural change (startup, load, reorder).
+        Guarantees table structure + visuals are coherent.
+        """
+
+        table = self.table
+        v_header = table.verticalHeader()
+
+        # 1️⃣ Freeze painting while we rebuild
+        table.setUpdatesEnabled(False)
+
+        # 2️⃣ Clear header paint state (CRITICAL)
+        if hasattr(v_header, "_row_colors"):
+            v_header._row_colors.clear()
+            v_header._drop_indicator_row = None
+
+        # 3️⃣ Rebuild table structure
+        self._rebuild_rows()            # sections + people rows
+        self._rebuild_cells()           # combos / values / services
+
+        # 4️⃣ Apply column-based shading (weekends / holidays)
+        self._shade_all_special_columns()
+        # 5️⃣ Apply row-based header coloring LAST
+        self._refresh_all_row_colors()
+
+        # 6️⃣ One single repaint
+        table.setUpdatesEnabled(True)
+        table.viewport().update()
+        v_header.viewport().update()
 
 
     def _load_month(self):
@@ -189,7 +221,7 @@ class MainWindow(QMainWindow):
             QTableWidgetItem(person.short_name)
         )
 
-        self._rebuild_all()
+        self.finalize_table_setup()
 
 
     def _open_add_person(self, event):
@@ -203,8 +235,7 @@ class MainWindow(QMainWindow):
         dialog = AddServiceDialog()
         if dialog.exec():
             self.services.append(dialog.service)
-            self._rebuild_cells()
-            self._refresh_visuals()
+            self.finalize_table_setup()
 
     def eventFilter(self, obj, event):
 
@@ -449,7 +480,7 @@ class MainWindow(QMainWindow):
         for row in range(start, end + 1):
             self._rebuild_row(row)
 
-        self._refresh_all_row_colors()
+        self.finalize_table_setup()
 
 
     def _reset_row_drag(self):
@@ -501,7 +532,7 @@ class MainWindow(QMainWindow):
         self.month_combo = QComboBox()
         self.month_combo.addItems(calendar.month_name[1:])
         self.month_combo.setCurrentIndex(real_life_month - 1)
-        self.month_combo.currentIndexChanged.connect(self._rebuild_all)
+        self.month_combo.currentIndexChanged.connect(self.finalize_table_setup)
 
         # Previous month button
         prev_btn = QPushButton("◀")
@@ -516,7 +547,7 @@ class MainWindow(QMainWindow):
         self.year_combo = QComboBox()
         self.year_combo.addItems([str(y) for y in range(2025, 2031)])
         self.year_combo.setCurrentText(f"{real_life_year}")
-        self.year_combo.currentIndexChanged.connect(self._rebuild_all)
+        self.year_combo.currentIndexChanged.connect(self.finalize_table_setup)
 
         controls_layout.addStretch()
         controls_layout.addWidget(QLabel("Month:"))
@@ -686,7 +717,7 @@ class MainWindow(QMainWindow):
 
         # Reflect UI
         self.table_clear()
-        self._rebuild_all()
+        self.finalize_table_setup()
 
 
 
@@ -709,6 +740,48 @@ class MainWindow(QMainWindow):
         color = QColor(200, 200, 200) if is_holiday else QBrush()
 
         self._shade_column_background(col, color)
+
+    def _shade_all_special_columns(self):
+        """
+        Apply all column-based shading (weekends + holidays).
+        Must be called AFTER structure & headers exist.
+        """
+
+        # First clear everything
+        self._clear_cell_backgrounds()
+
+        month = self.month_combo.currentIndex() + 1
+        year = int(self.year_combo.currentText())
+
+        prev_month = month - 1 if month > 1 else 12
+        prev_year = year if month > 1 else year - 1
+
+        days_in_prev_month = calendar.monthrange(prev_year, prev_month)[1]
+
+        # Ensure backend exists
+        self._load_month()
+
+        for col in range(self.table.columnCount()):
+            if col < self.n_prev_days:
+                day = days_in_prev_month - self.n_prev_days + 1 + col
+                key = (prev_year, prev_month)
+                display_year, display_month = prev_year, prev_month
+            else:
+                day = col - self.n_prev_days + 1
+                key = (year, month)
+                display_year, display_month = year, month
+
+            weekday = calendar.weekday(display_year, display_month, day)
+
+            # Weekends
+            if weekday >= 5:
+                self._shade_weekend_column(col)
+
+            # Holidays
+            month_data = self.schedule.get(key)
+            if month_data and day in month_data.holidays:
+                self._shade_holiday_column(col, month_data)
+
 
     def _shade_column_background(self, column, color: QColor):
         # Shade a single column without refreshing everything
@@ -739,63 +812,22 @@ class MainWindow(QMainWindow):
         self.table.setRowCount(0)
         self.table.setColumnCount(0)
 
-
     def save_file(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save Schedule", "", "MShift File (*.mshift)")
         if not path:
             return
-
-        data = {
-            "people": [p.to_dict() for p in self.people],
-            "services": [s.to_dict() for s in self.services],
-            "rows": self.rows,
-            "schedule": {
-                f"{year}_{month}": self.schedule[(year, month)].to_dict()
-                for year, month in self.schedule
-            }
-        }
-
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent = 2)
-
-    def to_dict(self):
-        return{
-            "year": self.year,
-            "month": self.month,
-            "holidays": list(self.holidays),
-            "services": self.services_data
-        }
+        save_schedule(self, path)
 
     def load_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Load Schedule", "", "MShift Files (*.mshift)")
+        path, _ = QFileDialog.getOpenFileName(self, "Load Schedule", "", "MShift File (*.mshift)")
         if not path:
             return
+        load_schedule(self, path)
 
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        # Rebuild people and services
-        self.people = [Person(**p) for p in data["people"]]
-        self.services = [Service(**s) for s in data ["services"]]
-
-        # Rebuild row (sections and ordering)
-        self.rows = data.get("rows", [])
-
-        # Rebuild Schedule
-        self.schedule = {}
-        for key, month_dict in data["schedule"].items():
-            self.schedule[tuple(map(int, key.split("_")))] = MonthData.from_dict(month_dict)
-
-        # Refresh UI
+        # UI refresh
         self.table_clear()
-        self._rebuild_all()
-
-    def from_dict(cls, data):
-        obj = cls(data["year"], data["month"])
-        obj.holidays = set(data.get("holidays", []))
-        obj.services_data = data.get("services", {})
-        return obj
-
+        self.finalize_table_setup()
+    
     def _resolve_day_context(self, column):
         month = self.month_combo.currentIndex() + 1
         year = int(self.year_combo.currentText())
@@ -911,7 +943,10 @@ class MainWindow(QMainWindow):
     def export_excel(self):
         export_to_excel(self)
 
+
     # REBUILDERS
+
+
     def _rebuild_structure(self):
         # CRITICAL, link backend to frontend
         self._load_month()
@@ -976,6 +1011,22 @@ class MainWindow(QMainWindow):
 
         color = self._hours_status_color(summary.ratio)
         self.table.verticalHeader().set_row_color(row_index, color)
+
+    def _rebuild_rows(self):
+        """
+        Rebuild table structure and all vertical header rows
+        (sections + people), but not cell widgets.
+        """
+        # 1️⃣ Structure: rows, columns, horizontal headers, weekend shading
+        self._rebuild_structure()
+
+        # 2️⃣ Vertical headers (sections + people)
+        for row_index, row_data in enumerate(self.rows):
+            if row_data["type"] == "section":
+                self._build_section_row(row_index, row_data["label"])
+            else:
+                self._rebuild_row(row_index)
+
 
     def _refresh_all_row_colors(self):
         for row_index, row_data in enumerate(self.rows):
@@ -1047,19 +1098,6 @@ class MainWindow(QMainWindow):
         for day in month_data.holidays:
             col = day + self.n_prev_days - 1
             self._shade_holiday_column(col, month_data)
-
-
-    # Use ONLY when table structure (month, year, people, file load) changes
-    def _rebuild_all(self):
-        # Rebuild table structure + weekend shading
-        self._rebuild_structure()
-
-        # Rebuild all person rows (vertical headers + combo)
-        self._rebuild_cells()
-        self._refresh_all_row_colors()
-
-        # Shade holiday  columns (over weekends if necessary)
-        self._rebuild_holiday_shading()
 
 # -------------------------
 # APP ENTRY POINT
