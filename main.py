@@ -123,38 +123,6 @@ class MainWindow(QMainWindow):
 
         self.finalize_table_setup()
 
-    def finalize_table_setup(self):
-        """
-        Called once after any structural change (startup, load, reorder).
-        Guarantees table structure + visuals are coherent.
-        """
-
-        table = self.table
-        v_header = table.verticalHeader()
-
-        # 1️⃣ Freeze painting while we rebuild
-        table.setUpdatesEnabled(False)
-
-        # 2️⃣ Clear header paint state (CRITICAL)
-        if hasattr(v_header, "_row_colors"):
-            v_header._row_colors.clear()
-            v_header._drop_indicator_row = None
-
-        # 3️⃣ Rebuild table structure
-        self._rebuild_rows()            # sections + people rows
-        self._rebuild_cells()           # combos / values / services
-
-        # 4️⃣ Apply column-based shading (weekends / holidays)
-        self._shade_all_special_columns()
-        # 5️⃣ Apply row-based header coloring LAST
-        self._refresh_all_row_colors()
-
-        # 6️⃣ One single repaint
-        table.setUpdatesEnabled(True)
-        table.viewport().update()
-        v_header.viewport().update()
-
-
     def _load_month(self):
         year = int(self.year_combo.currentText())
         month = self.month_combo.currentIndex() + 1
@@ -345,7 +313,7 @@ class MainWindow(QMainWindow):
 
                     # UI update
                     self.table.removeCellWidget(row, column)
-                    self._refresh_visuals()
+                    self.refresh_row_headers()
 
                 return True  # ⛔ consume the event
 
@@ -444,7 +412,7 @@ class MainWindow(QMainWindow):
         self.table.setCellWidget(tgt_row, tgt_col, tgt_combo)
 
         del self._drag_source
-        self._refresh_visuals()
+        self.refresh_row_headers()
 
     def _handle_row_drop(self):
         if not self._row_dragging:
@@ -456,8 +424,6 @@ class MainWindow(QMainWindow):
         if source is None or target is None or target == source:
             self._reset_row_drag()
             return
-
-        self._clear_row_widgets(source)
 
         # Get person rows only
         person_row = self.rows.pop(source)
@@ -473,12 +439,6 @@ class MainWindow(QMainWindow):
 
         # Clear vertical header colors
         self.table.verticalHeader()._row_colors.clear()
-
-        # Rebuild rows
-        start = min(source, insert_index)
-        end = max(source, insert_index)
-        for row in range(start, end + 1):
-            self._rebuild_row(row)
 
         self.finalize_table_setup()
 
@@ -667,7 +627,7 @@ class MainWindow(QMainWindow):
 
             update_combo_style(service)
 
-            self._refresh_visuals()
+            self.refresh_row_headers()
 
         combo.currentIndexChanged.connect(on_service_selected)
 
@@ -702,8 +662,8 @@ class MainWindow(QMainWindow):
         dialog = ManageServicesDialog(self.services)
 
         if dialog.exec_() == QDialog.Accepted:
-            self._rebuild_cells()
-            self._refresh_visuals()
+            self.rebuild_cells()
+            self.refresh_row_headers()
 
     def open_about_dialog(self):
         print("Open about dialog (not implemented yet)")
@@ -741,7 +701,7 @@ class MainWindow(QMainWindow):
 
         self._shade_column_background(col, color)
 
-    def _shade_all_special_columns(self):
+    def refresh_column_shading(self):
         """
         Apply all column-based shading (weekends + holidays).
         Must be called AFTER structure & headers exist.
@@ -750,6 +710,9 @@ class MainWindow(QMainWindow):
         # First clear everything
         self._clear_cell_backgrounds()
 
+        # Ensure backend exists
+        self._load_month()
+
         month = self.month_combo.currentIndex() + 1
         year = int(self.year_combo.currentText())
 
@@ -757,9 +720,6 @@ class MainWindow(QMainWindow):
         prev_year = year if month > 1 else year - 1
 
         days_in_prev_month = calendar.monthrange(prev_year, prev_month)[1]
-
-        # Ensure backend exists
-        self._load_month()
 
         for col in range(self.table.columnCount()):
             if col < self.n_prev_days:
@@ -799,12 +759,6 @@ class MainWindow(QMainWindow):
                 item = self.table.item(row, col)
                 if item is not None:
                     item.setBackground(QBrush())
-
-    def _clear_row_widgets(self, row_index):
-        for col in range(self.table.columnCount()):
-            widget = self.table.cellWidget(row_index, col)
-            if widget:
-                self.table.removeCellWidget(row_index, col)
 
     def table_clear(self):
         """Clears all table content but keeps the table widget itself."""
@@ -946,8 +900,35 @@ class MainWindow(QMainWindow):
 
     # REBUILDERS
 
+    def finalize_table_setup(self):
+        """
+        Called once after any structural change (startup, load, reorder).
+        Guarantees table structure + visuals are coherent.
+        """
 
-    def _rebuild_structure(self):
+        table = self.table
+        v_header = table.verticalHeader()
+
+        # 1️⃣ Freeze painting while we rebuild
+        table.setUpdatesEnabled(False)
+
+        # 2️⃣ Clear header paint state (CRITICAL)
+        if hasattr(v_header, "_row_colors"):
+            v_header._row_colors.clear()
+            v_header._drop_indicator_row = None
+
+        self.rebuild_structure_and_rows()
+        self.rebuild_cells()
+        self.refresh_column_shading()
+        self.refresh_row_headers()
+
+        # 6️⃣ One single repaint
+        table.setUpdatesEnabled(True)
+        table.viewport().update()
+        v_header.viewport().update()
+
+
+    def rebuild_structure(self):
         # CRITICAL, link backend to frontend
         self._load_month()
         
@@ -964,10 +945,6 @@ class MainWindow(QMainWindow):
 
         total_days = self.n_prev_days + days_in_month
         self.table.setColumnCount(total_days)
-
-
-        # CLear baclgrounds
-        self._clear_cell_backgrounds()
 
         # Create horizontal headers + shading
         for col in range(total_days):
@@ -988,63 +965,20 @@ class MainWindow(QMainWindow):
             item.setTextAlignment(Qt.AlignCenter)
             self.table.setHorizontalHeaderItem(col, item)
 
-            # Shade only weekends
-            if weekday_index >= 5:
-                self._shade_weekend_column(col)
-
         # Reset scroll to beginning
         self.table.horizontalScrollBar().setValue(0)
 
-    def _rebuild_row(self, row_index):
-        row_data = self.rows[row_index]
-        if row_data["type"] != "person":
-            return
-        
-        person = next(p for p in self.people if p.id == row_data["person_id"])
-        month = self.month_combo.currentIndex() + 1
-        year = int(self.year_combo.currentText())
-
-        summary = self.get_monthly_work_summary(person, year, month)
-
-        text = f"{person.short_name} ({int(summary.worked)}h / {int(summary.expected)}h)"
-        self.table.setVerticalHeaderItem(row_index, QTableWidgetItem(text))
-
-        color = self._hours_status_color(summary.ratio)
-        self.table.verticalHeader().set_row_color(row_index, color)
-
-    def _rebuild_rows(self):
-        """
-        Rebuild table structure and all vertical header rows
-        (sections + people), but not cell widgets.
-        """
+    def rebuild_structure_and_rows(self):
         # 1️⃣ Structure: rows, columns, horizontal headers, weekend shading
-        self._rebuild_structure()
+        self.rebuild_structure()
 
         # 2️⃣ Vertical headers (sections + people)
         for row_index, row_data in enumerate(self.rows):
             if row_data["type"] == "section":
                 self._build_section_row(row_index, row_data["label"])
-            else:
-                self._rebuild_row(row_index)
 
 
-    def _refresh_all_row_colors(self):
-        for row_index, row_data in enumerate(self.rows):
-            if row_data["type"] != "person":
-                continue
-
-            person = next(p for p in self.people if p.id == row_data["person_id"])
-            month = self.month_combo.currentIndex() + 1
-            year = int(self.year_combo.currentText())
-
-            summary = self.get_monthly_work_summary(person, year, month)
-            color = self._hours_status_color(summary.ratio)
-
-            self.table.verticalHeader().set_row_color(row_index, color)
-
-
-
-    def _rebuild_cells(self):
+    def rebuild_cells(self):
         for row_index, row_data in enumerate(self.rows):
             if row_data["type"] != "person":
                 continue
@@ -1066,16 +1000,14 @@ class MainWindow(QMainWindow):
                 )
                 self.table.setCellWidget(row_index, col, combo)
 
-    def _refresh_visuals(self):
+    def refresh_row_headers(self):
         month = self.month_combo.currentIndex() + 1
         year = int(self.year_combo.currentText())
-
         header = self.table.verticalHeader()
 
         # Set vertical headers
         for row_index, row_data in enumerate(self.rows):
             if row_data["type"] == "section":
-                self._build_section_row(row_index, row_data["label"])
                 continue
 
             person = next(p for p in self.people if p.id == row_data["person_id"])
@@ -1086,18 +1018,6 @@ class MainWindow(QMainWindow):
 
             color = self._hours_status_color(summary.ratio)
             header.set_row_color(row_index, color)
-
-    def _rebuild_holiday_shading(self):
-        month = self.month_combo.currentIndex() + 1
-        year = int(self.year_combo.currentText())
-        key = (year, month)
-        month_data = self.schedule.get(key)
-        if not month_data:
-            return
-
-        for day in month_data.holidays:
-            col = day + self.n_prev_days - 1
-            self._shade_holiday_column(col, month_data)
 
 # -------------------------
 # APP ENTRY POINT
