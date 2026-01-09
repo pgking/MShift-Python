@@ -424,6 +424,10 @@ class MainWindow(QMainWindow):
         if source is None or target is None or target == source:
             self._reset_row_drag()
             return
+        
+        # Remove old widgets from the source row
+        for col in range(self.table.columnCount()):
+            self.table.removeCellWidget(source, col)
 
         # Get person rows only
         person_row = self.rows.pop(source)

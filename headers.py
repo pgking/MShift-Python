@@ -1,5 +1,5 @@
 from PyQt5.QtCore import Qt, QRect
-from PyQt5.QtWidgets import QHeaderView, QMenu, QTableWidgetItem
+from PyQt5.QtWidgets import QHeaderView, QMenu
 from PyQt5.QtGui import QPainter, QPen, QColor, QBrush
 
 class ColoredVerticalHeader(QHeaderView):
