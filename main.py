@@ -1,7 +1,5 @@
 import sys
 import calendar
-import uuid
-import json
 
 from datetime import datetime
 
@@ -23,24 +21,16 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QLabel,
     QDialog,
-    QLineEdit,
     QPushButton,
-    QSpinBox,
-    QFormLayout,
-    QColorDialog,
     QFileDialog,
-    QHeaderView,
-    QMenu
+    QHeaderView
 )
 from PyQt5.QtGui import (
     QColor,
-    QBrush,
-    QPainter,
-    QPen
+    QBrush
 )
 from PyQt5.QtCore import (
-    Qt,
-    QRect
+    Qt
 )
 
 class MonthlyWorkSummary:
