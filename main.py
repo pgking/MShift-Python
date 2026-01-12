@@ -9,6 +9,7 @@ from menu_bar import MenuBar
 from headers import ColoredVerticalHeader, ClickableHorizontalHeader
 from exporter import export_to_excel
 from file_io import save_schedule, load_schedule
+from service_cell import ServiceCell
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -449,6 +450,10 @@ class MainWindow(QMainWindow):
         if combo is None:
             return
         combo.showPopup()
+        view = combo.view()
+        view.clicked.connect(
+            lambda idx, c=combo: c._service_cell.apply_service_by_index(idx.row())
+        )
 
 
 
@@ -563,17 +568,7 @@ class MainWindow(QMainWindow):
             return None # <-- Do nothing for sections
 
         combo = QComboBox()
-        combo.setContextMenuPolicy(Qt.NoContextMenu)
-        combo.setEditable(True)
         combo.setAttribute(Qt.WA_TransparentForMouseEvents)
-        combo.setMaxVisibleItems(len(self.services) + 1)
-
-        line = combo.lineEdit()
-        line.setReadOnly(True)
-        line.setAlignment(Qt.AlignCenter)
-        line.setContextMenuPolicy(Qt.NoContextMenu)
-
-        combo.addItem("")
 
         person = next((p for p in self.people if p.id  == row_data["person_id"]), None)
         if person is None:
@@ -581,60 +576,23 @@ class MainWindow(QMainWindow):
 
         month_data, day = self._resolve_day_context(column)
 
-        for service in self.services:
-            combo.addItem(service.name)
+        # Hand over control to ServiceCell
+        combo._service_cell = ServiceCell(
+            combo = combo,
+            main_window = self,
+            person = person,
+            day = day,
+            month_data = month_data,
+            services = self.services
+        )
 
-        def update_combo_style(service=None):
-            color = service.color_hex if service else "transparent"
-            combo.setStyleSheet(f"""
-                QComboBox {{
-                    background-color: {color};
-                    border: none;
-                    padding-left: 4px;
-                }}
-                QComboBox::drop-down {{
-                    width: 0px;
-                    border: none;
-                }}
-                QComboBox::down-arrow {{
-                    image: none;
-                }}
-            """)
-
-        update_combo_style()
-
-        def on_service_selected(index):
-            if index == 0:
-                month_data.set_service(person.id, day, None)
-                update_combo_style()
-                combo.setCurrentIndex(0)
-                return
-
-            service = self.services[index - 1]
-
-            month_data.set_service(
-                person.id,
-                day,
-                service.id
-            )
-
-            combo.setCurrentText(service.short_name)
-
-            update_combo_style(service)
-
-            self.refresh_row_headers()
-
-        combo.currentIndexChanged.connect(on_service_selected)
-
-        if preset_service :
-            for i, service in enumerate(self.services) :
-                if service.id == preset_service :
-                   combo.setCurrentIndex(i + 1)
-                   break
+        # Preset existing service (if any)
+        if preset_service:
+            service = next(s for s in self.services if s.id == preset_service)
+            combo._service_cell.preset_service(service)
 
         return combo
-
-
+    
     def _ensure_combo(self, row, column) :
         combo = self.table.cellWidget(row, column)
         if combo is None :
