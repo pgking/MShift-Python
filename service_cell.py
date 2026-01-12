@@ -61,26 +61,18 @@ class ServiceCell:
         else:
             service = self.services[index - 1]
             self.month_data.set_service(self.person.id, self.day, service.id)
+            self.combo.setCurrentIndex(index)
+            self.combo.setCurrentText(service.short_name)
             self._apply_style(service)
 
+        self.combo.update()
+        self.combo.repaint()
         self.main_window.refresh_row_headers()
 
 
     # -------------------------
     # BEHAVIOR
     # -------------------------
-
-    def _on_service_selected(self, index: int):
-        if index == 0:
-            self.month_data.set_service(self.person.id, self.day, None)
-            self._apply_style(None)
-            self.combo.setCurrentIndex(0)
-        else:
-            service = self.services[index - 1]
-            self.month_data.set_service(self.person.id, self.day, service.id)
-            self._apply_style(service)
-
-        self.main_window.refresh_row_headers()
 
     def preset_service(self, service):
         """
