@@ -566,6 +566,7 @@ class MainWindow(QMainWindow):
         combo.setContextMenuPolicy(Qt.NoContextMenu)
         combo.setEditable(True)
         combo.setAttribute(Qt.WA_TransparentForMouseEvents)
+        combo.setMaxVisibleItems(len(self.services) + 1)
 
         line = combo.lineEdit()
         line.setReadOnly(True)
