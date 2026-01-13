@@ -1,7 +1,7 @@
 import calendar
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QTableWidgetItem
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QBrush
 
 
 class TableRebuilder:
@@ -117,5 +117,67 @@ class TableRebuilder:
                 item.setFlags(Qt.ItemIsEnabled)
                 self.table.setItem(row, column, item)
             item.setBackground(color)
+
+    def clear_cell_backgrounds(self):
+        for row in range(self.table.rowCount()):
+            for col in range(self.table.columnCount()):
+                item = self.table.item(row, col)
+                if item is not None:
+                    item.setBackground(QBrush())
+
+    def refresh_column_shading(self):
+        """
+        Apply all column-based shading (weekends + holidays).
+        Must be called AFTER structure & headers exist.
+        """
+
+        # First clear everything
+        self.clear_cell_backgrounds()
+
+        # Ensure backend exists
+        self.mw._load_month()
+
+        month = self.mw.month_combo.currentIndex() + 1
+        year = int(self.mw.year_combo.currentText())
+
+        prev_month = month - 1 if month > 1 else 12
+        prev_year = year if month > 1 else year - 1
+
+        days_in_prev_month = calendar.monthrange(prev_year, prev_month)[1]
+
+        for col in range(self.table.columnCount()):
+            if col < self.mw.n_prev_days:
+                day = days_in_prev_month - self.mw.n_prev_days + 1 + col
+                key = (prev_year, prev_month)
+                display_year, display_month = prev_year, prev_month
+            else:
+                day = col - self.mw.n_prev_days + 1
+                key = (year, month)
+                display_year, display_month = year, month
+
+            weekday = calendar.weekday(display_year, display_month, day)
+
+            # Weekends
+            if weekday >= 5:
+                self._shade_weekend_column(col)
+
+            # Holidays
+            month_data = self.mw.schedule.get(key)
+            if month_data and day in month_data.holidays:
+                self._shade_holiday_column(col, month_data)
+
+    def _shade_weekend_column(self, column):
+        color = QColor(200, 200, 200)
+
+        self._shade_column_background(column, color)
+
+    def _shade_holiday_column(self, col, month_data):
+        _, day = self.mw._resolve_day_context(col)
+        is_holiday = day in month_data.holidays
+
+        color = QColor(200, 200, 200) if is_holiday else QBrush()
+
+        self._shade_column_background(col, color)
+
 
 

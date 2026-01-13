@@ -123,7 +123,5 @@ class ClickableHorizontalHeader(QHeaderView):
         _, day = self.main_window._resolve_day_context(col)
         month_data.toggle_holiday(day)
 
-        # Only shade one column
-        is_holiday = day in month_data.holidays
-        color = QColor(200, 200, 200) if is_holiday else QBrush()
-        self.main_window._shade_column_background(col, color)
+        self.main_window.table_rebuilder.refresh_column_shading()
+        self.main_window.refresh_row_headers()

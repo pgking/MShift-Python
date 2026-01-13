@@ -650,69 +650,6 @@ class MainWindow(QMainWindow):
     # LOGIC
     # -------------------------
 
-    # SHADERS
-
-    def _shade_weekend_column(self, column):
-        color = QColor(200, 200, 200)
-
-        self._shade_column_background(column, color)
-
-    def _shade_holiday_column(self, col, month_data):
-        _, day = self._resolve_day_context(col)
-        is_holiday = day in month_data.holidays
-
-        color = QColor(200, 200, 200) if is_holiday else QBrush()
-
-        self._shade_column_background(col, color)
-
-    def refresh_column_shading(self):
-        """
-        Apply all column-based shading (weekends + holidays).
-        Must be called AFTER structure & headers exist.
-        """
-
-        # First clear everything
-        self._clear_cell_backgrounds()
-
-        # Ensure backend exists
-        self._load_month()
-
-        month = self.month_combo.currentIndex() + 1
-        year = int(self.year_combo.currentText())
-
-        prev_month = month - 1 if month > 1 else 12
-        prev_year = year if month > 1 else year - 1
-
-        days_in_prev_month = calendar.monthrange(prev_year, prev_month)[1]
-
-        for col in range(self.table.columnCount()):
-            if col < self.n_prev_days:
-                day = days_in_prev_month - self.n_prev_days + 1 + col
-                key = (prev_year, prev_month)
-                display_year, display_month = prev_year, prev_month
-            else:
-                day = col - self.n_prev_days + 1
-                key = (year, month)
-                display_year, display_month = year, month
-
-            weekday = calendar.weekday(display_year, display_month, day)
-
-            # Weekends
-            if weekday >= 5:
-                self._shade_weekend_column(col)
-
-            # Holidays
-            month_data = self.schedule.get(key)
-            if month_data and day in month_data.holidays:
-                self._shade_holiday_column(col, month_data)
-
-    def _clear_cell_backgrounds(self):
-        for row in range(self.table.rowCount()):
-            for col in range(self.table.columnCount()):
-                item = self.table.item(row, col)
-                if item is not None:
-                    item.setBackground(QBrush())
-
     def table_clear(self):
         """Clears all table content but keeps the table widget itself."""
         self.table.clearContents()  # Clears all items
@@ -838,6 +775,7 @@ class MainWindow(QMainWindow):
 
     def finalize_table_setup(self):
         self.table_rebuilder.finalize()
+        self.table_rebuilder.refresh_column_shading()
 
     def refresh_row_headers(self):
         month = self.month_combo.currentIndex() + 1
