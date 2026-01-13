@@ -64,7 +64,11 @@ class MainWindow(QMainWindow):
         self._row_drag_source = None
         self._row_drag_target = None
 
+        # Previous days shown
         self.n_prev_days = 3
+
+        # Copy paste start
+        self._clipboard_service_id = None
 
         self.people = []
         self.services = [
@@ -249,6 +253,50 @@ class MainWindow(QMainWindow):
             # LEFT BUTTON RELEASE
             # -----------------
             if event.type() == event.MouseButtonRelease and event.button() == Qt.LeftButton:
+                # -----------------
+                # SHIFT + LEFT CLICK → PASTE SERVICE
+                # -----------------
+                modifiers = QApplication.keyboardModifiers()
+                if modifiers & Qt.ShiftModifier:
+                    if self._clipboard_service_id is None:
+                        return True
+
+                    index = self.table.indexAt(event.pos())
+                    if not index.isValid():
+                        return True
+
+                    row = index.row()
+                    col = index.column()
+
+                    row_data = self.rows[row]
+                    if row_data["type"] != "person":
+                        return True
+
+                    person = next(
+                        (p for p in self.people if p.id == row_data["person_id"]),
+                        None
+                    )
+                    if not person:
+                        return True
+
+                    month_data, day = self._resolve_day_context(col)
+
+                    # Backend write (single source of truth)
+                    month_data.set_service(person.id, day, self._clipboard_service_id)
+
+                    # UI re-projection
+                    self.table.removeCellWidget(row, col)
+
+                    combo = self._create_service_combo(
+                        row,
+                        col,
+                        preset_service=self._clipboard_service_id
+                    )
+                    self.table.setCellWidget(row, col, combo)
+
+                    self.refresh_row_headers()
+                    return True
+
                 if self._mouse_pressed_index is None:
                     return False
 
@@ -271,6 +319,40 @@ class MainWindow(QMainWindow):
             # RIGHT CLICK ON CELL (DELETE)
             # -----------------
             if event.type() == event.MouseButtonPress and event.button() == Qt.RightButton:
+                # -----------------
+                # SHIFT + RIGHT CLICK → COPY SERVICE
+                # -----------------
+                modifiers = QApplication.keyboardModifiers()
+                if modifiers & Qt.ShiftModifier:
+                    index = self.table.indexAt(event.pos())
+                    if not index.isValid():
+                        return True
+
+                    row = index.row()
+                    col = index.column()
+
+                    row_data = self.rows[row]
+                    if row_data["type"] != "person":
+                        return True
+
+                    person = next(
+                        (p for p in self.people if p.id == row_data["person_id"]),
+                        None
+                    )
+                    if not person:
+                        return True
+
+                    month_data, day = self._resolve_day_context(col)
+                    service_id = month_data.get_service(person.id, day)
+
+                    if service_id is None:
+                        return True  # nothing to copy
+
+                    self._clipboard_service_id = service_id
+                    print("[COPY] service_id =", service_id)
+
+                    return True  # ⛔ consume event
+
                 index = self.table.indexAt(event.pos())
                 if not index.isValid():
                     return True
