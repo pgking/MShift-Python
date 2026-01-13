@@ -268,18 +268,11 @@ class MainWindow(QMainWindow):
                     row = index.row()
                     col = index.column()
 
-                    row_data = self.rows[row]
-                    if row_data["type"] != "person":
+                    resolved = self._resolve_person_cell(row, col)
+                    if not resolved:
                         return True
-
-                    person = next(
-                        (p for p in self.people if p.id == row_data["person_id"]),
-                        None
-                    )
-                    if not person:
-                        return True
-
-                    month_data, day = self._resolve_day_context(col)
+                    
+                    person, month_data, day = resolved
 
                     # Backend write (single source of truth)
                     month_data.set_service(person.id, day, self._clipboard_service_id)
@@ -331,18 +324,11 @@ class MainWindow(QMainWindow):
                     row = index.row()
                     col = index.column()
 
-                    row_data = self.rows[row]
-                    if row_data["type"] != "person":
+                    resolved = self._resolve_person_cell(row, col)
+                    if not resolved:
                         return True
-
-                    person = next(
-                        (p for p in self.people if p.id == row_data["person_id"]),
-                        None
-                    )
-                    if not person:
-                        return True
-
-                    month_data, day = self._resolve_day_context(col)
+                    
+                    person, month_data, day = resolved
                     service_id = month_data.get_service(person.id, day)
 
                     if service_id is None:
@@ -360,20 +346,11 @@ class MainWindow(QMainWindow):
                 row = index.row()
                 column = index.column()
 
-                # Ignore placeholder row
-                if row == 0 and self.table.verticalHeaderItem(row) is None:
-                    return True
-
-                # Ignore section rows
-                row_data = self.rows[row]
-                if row_data["type"] != "person":
+                resolved = self._resolve_person_cell(row, column)
+                if not resolved:
                     return True
                 
-                person = next((p for p in self.people if p.id == row_data["person_id"]), None)
-                if person is None:
-                    return True
-                
-                month_data, day = self._resolve_day_context(column)
+                person, month_data, day = resolved
 
                 service_id = month_data.get_service(person.id, day)
                 if service_id is not None:
@@ -393,17 +370,12 @@ class MainWindow(QMainWindow):
         row = index.row()
         col = index.column()
 
-        row_data = self.rows[row]
-        if row_data["type"] != "person":
-            print("Drag aborted: section row")
-            return
-
-        person_id = row_data["person_id"]
-        person = next((p for p in self.people if p.id == person_id), None)
-        if person is None:
-            return
-
-        month_data, day = self._resolve_day_context(col)
+        resolved = self._resolve_person_cell(row, col)
+        if not resolved:
+            print("Drag aborted : invalid cell")
+            return True
+        
+        person, month_data, day = resolved
         service_id = month_data.get_service(person.id, day)
 
         if service_id is None :
@@ -425,28 +397,23 @@ class MainWindow(QMainWindow):
         tgt_row = target.row()
         tgt_col = target.column()
 
-        # Ignore drops on section rows
-        row_data = self.rows[tgt_row]
-        if row_data["type"] != "person":
-            return
-
-        tgt_person_id = row_data["person_id"]
-        tgt_person = next((p for p in self.people if p.id == tgt_person_id), None)
-        if tgt_person is None:
-            return
+        resolved_target = self._resolve_person_cell(tgt_row, tgt_col)
+        if not resolved_target:
+            return True
+        
+        tgt_person, tgt_month_data, tgt_day = resolved_target
 
         src_person_id, src_col, service_id = self._drag_source
-        src_person = next((p for p in self.people if p.id == src_person_id), None)
-        if src_person is None:
+        src_row = next(
+            i for i, r in enumerate(self.rows)
+            if r.get("person_id") == src_person_id
+        )
+
+        resolved_source = self._resolve_person_cell(src_row, src_col)
+        if not resolved_source:
             return
 
-        # Same cell --> Do nothing
-        if src_person_id == tgt_person_id and src_col == tgt_col:
-            return
-
-        # Backend update
-        src_month_data, src_day = self._resolve_day_context(src_col)
-        tgt_month_data, tgt_day = self._resolve_day_context(tgt_col)
+        src_person, src_month_data, src_day = resolved_source
 
         target_service_id = tgt_month_data.get_service(
             tgt_person.id,
@@ -750,6 +717,35 @@ class MainWindow(QMainWindow):
         # UI refresh
         self.table_clear()
         self.finalize_table_setup()
+
+    def _resolve_person_cell(self, row: int, col: int):
+        """
+        Resolve a table cell into domain objects.
+
+        Returns:
+            (person, month_data, day) if the cell is a valid person cell
+            None otherwise
+        """
+        if row < 0 or col < 0:
+            return None
+
+        if row >= len(self.rows):
+            return None
+
+        row_data = self.rows[row]
+        if row_data["type"] != "person":
+            return None
+
+        person = next(
+            (p for p in self.people if p.id == row_data["person_id"]),
+            None
+        )
+        if person is None:
+            return None
+
+        month_data, day = self._resolve_day_context(col)
+        return person, month_data, day
+
     
     def _resolve_day_context(self, column):
         month = self.month_combo.currentIndex() + 1
