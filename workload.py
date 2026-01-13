@@ -1,0 +1,71 @@
+import calendar
+
+from dataclasses import dataclass
+from PyQt5.QtGui import QColor
+
+from models import Person, MonthData, Service
+
+@dataclass
+class MonthlyWorkSummary:
+    worked: float
+    expected: float
+
+    @property
+    def ratio(self) -> float:
+        return 0 if self.expected == 0 else self.worked / self.expected
+    
+class WorkloadCalculator:
+    def __init__(self, schedule: dict, services: list[Service]):
+        self.schedule = schedule
+        self.services = services
+
+    def expected_hours_for_month(self, person: Person, year: int, month: int) -> float:
+        weekdays = 0
+        days_in_month = calendar.monthrange(year, month)[1]
+
+        for day in range(1, days_in_month + 1):
+            if calendar.weekday(year, month, day) < 5:
+                weekdays += 1
+
+        base_hours = 7 * weekdays * (person.percentage / 100.0)
+
+        key = (year, month)
+        holidays = self.schedule.get(key).holidays if key in self.schedule else set()
+        holiday_hours = 7 * len(holidays)
+
+        return base_hours - holiday_hours
+    
+    def worked_hours_for_person(self, person: Person, year: int, month: int) -> float:
+        key = (year, month)
+        if key not in self.schedule:
+            return 0.0
+        
+        month_data = self.schedule[key]
+        total_hours = 0.0
+
+        for day in range(1, calendar.monthrange(year, month)[1] + 1):
+            service_id = month_data.get_service(person.id, day)
+            if service_id is None:
+                continue
+
+            service = next((s for s in self.services if s.id == service_id), None)
+            if service:
+                total_hours += service.hours
+
+        return total_hours
+    
+    def monthly_summary(self, person: Person, year: int, month: int) -> MonthlyWorkSummary:
+        return MonthlyWorkSummary(
+            worked=self.worked_hours_for_person(person, year, month),
+            expected=self.expected_hours_for_month(person, year, month)
+        )
+    
+    def status_color(self, ratio: float) -> QColor:
+        if ratio < 0.9:
+            return QColor(170, 200, 255)  # Light blue
+        
+        elif ratio > 1.1:
+            return QColor(255, 180, 180)  # Light red
+        
+        else:
+            return QColor(180, 230, 180)  # Light green

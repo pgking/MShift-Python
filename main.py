@@ -11,6 +11,7 @@ from exporter import export_to_excel
 from file_io import save_schedule, load_schedule
 from service_cell import ServiceCell
 from table_rebuilder import TableRebuilder
+from workload import WorkloadCalculator
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -34,15 +35,6 @@ from PyQt5.QtGui import (
 from PyQt5.QtCore import (
     Qt
 )
-
-class MonthlyWorkSummary:
-    def __init__(self, worked: float, expected: float):
-        self.worked = worked
-        self.expected = expected
-
-    @property
-    def ratio(self) -> float:
-        return 0 if self.expected == 0 else self.worked / self.expected
 
 
 # -------------------------
@@ -112,6 +104,7 @@ class MainWindow(QMainWindow):
         self._setup_table()
 
         self.table_rebuilder = TableRebuilder(self)
+        self.workload = WorkloadCalculator(schedule= self.schedule, services= self.services)
 
         self._add_person_to_table(Person("Tiphaine",  "Angibaud", 100))
 
@@ -668,6 +661,10 @@ class MainWindow(QMainWindow):
             return
         load_schedule(self, path)
 
+        # Update workload calculator
+        self.workload.schedule = self.schedule
+        self.workload.services = self.services
+
         # UI refresh
         self.table_clear()
         self.finalize_table_setup()
@@ -691,60 +688,6 @@ class MainWindow(QMainWindow):
             self.schedule[key] = MonthData(*key)
 
         return self.schedule[key], day
-    
-    def _expected_hours_for_month(self, person: Person, year: int, month: int) -> float:
-        # Working hours : (7 x number of week days in month x percentage) - (7 x holidays on week days)
-        weekdays = 0
-        days_in_month = calendar.monthrange(year, month)[1]
-
-        for day in range(1, days_in_month + 1):
-            if calendar.weekday(year, month, day) < 5:
-                weekdays += 1
-
-        base_hours = 7 * weekdays *(person.percentage / 100.0)
-
-        # Substract holidays
-        key = (year, month)
-        holidays = self.schedule.get(key).holidays if key in self.schedule else set()
-        holiday_hours = 7 * len(holidays)
-
-        return base_hours - holiday_hours
-    
-    def _worked_hours_for_person(self, person: Person, year: int, month: int) -> float:
-        key = (year, month)
-        if key not in self.schedule:
-            return 0.0
-        
-        month_data = self.schedule[key]
-        total_hours = 0.0
-
-        for day in range(1, calendar.monthrange(year, month)[1] + 1):
-            service_id = month_data.get_service(person.id, day)
-            if service_id is None:
-                continue
-
-            service = next((s for s in self.services if s.id == service_id), None)
-            if service:
-                total_hours += service.hours
-
-        return total_hours
-    
-    def _hours_status_color(self, ratio: float) -> QColor:
-        if ratio < 0.9:
-            return QColor(170, 200, 255)  # Light blue
-        
-        elif ratio > 1.1:
-            return QColor(255, 180, 180)  # Light red
-        
-        else:
-            return QColor(180, 230, 180)  # Light green
-        
-    def get_monthly_work_summary(self, person: Person, year: int, month: int) -> MonthlyWorkSummary:
-        return MonthlyWorkSummary(
-            worked=self._worked_hours_for_person(person, year, month),
-            expected=self._expected_hours_for_month(person, year, month)
-        )
-
     
     def _go_to_previous_month(self):
         month = self.month_combo.currentIndex()
@@ -788,12 +731,12 @@ class MainWindow(QMainWindow):
                 continue
 
             person = next(p for p in self.people if p.id == row_data["person_id"])
-            summary = self.get_monthly_work_summary(person, year, month)
+            summary = self.workload.monthly_summary(person, year, month)
 
             text = f"{person.short_name} ({int(summary.worked)}h / {int(summary.expected)}h)"
             self.table.setVerticalHeaderItem(row_index, QTableWidgetItem(text))
 
-            color = self._hours_status_color(summary.ratio)
+            color = self.workload.status_color(summary.ratio)
             header.set_row_color(row_index, color)
 
 # -------------------------
