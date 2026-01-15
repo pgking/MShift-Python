@@ -377,6 +377,10 @@ class PreferencesDialog(QDialog):
             self.drag_mode_combo.currentData()
         )
 
+        self.preferences.previous_days_shown = (
+            self.prev_days_spin.value()
+        )
+
         super().accept()
 
     def _add_page(self, widget: QWidget):
@@ -386,13 +390,21 @@ class PreferencesDialog(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
 
-        label = QLabel(
-            "General application settings.\n\n"
-            "These options affect overall behavior of the scheduler."
+        title = QLabel(
+            "General"
         )
-        label.setAlignment(Qt.AlignTop | Qt.AlignCenter)
+        title.setStyleSheet("font-weight: bold;")
+        title.setAlignment(Qt.AlignCenter)
 
-        layout.addWidget(label)
+        days_label = QLabel("Number of previous month days shown : ")
+        self.prev_days_spin = QSpinBox()
+        self.prev_days_spin.setRange(0, 7)
+        self.prev_days_spin.setValue(self.preferences.previous_days_shown)
+
+        layout.addWidget(title)
+        layout.addSpacing(10)
+        layout.addWidget(days_label)
+        layout.addWidget(self.prev_days_spin)
         layout.addStretch()
 
         self._add_page(page)

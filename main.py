@@ -31,7 +31,13 @@ from PyQt5.QtWidgets import (
     QMenu
 )
 from PyQt5.QtCore import (
-    Qt
+    Qt,
+    QEvent
+)
+from PyQt5.QtGui import (
+    QPen,
+    QColor,
+    QPainter
 )
 
 
@@ -64,6 +70,10 @@ class MainWindow(QMainWindow):
 
         # Copy paste start
         self._clipboard_service_id = None
+        self._clipboard_cell = None
+
+        # Shift tracking for copy rectangle
+        self._shift_only_down = False
 
         self.people = []
         self.services = [
@@ -107,10 +117,11 @@ class MainWindow(QMainWindow):
 
         # Preferences
         self.preferences = Preferences()
-        self.preferences.previous_days_shown = 3  # Default value
         self.n_prev_days = self.preferences.previous_days_shown
 
         self._add_person_to_table(Person("Tiphaine",  "Angibaud", 100))
+
+        self.installEventFilter(self)
 
         self.finalize_table_setup()
 
@@ -198,11 +209,20 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, event):
 
+        if event.type() in (QEvent.KeyPress, QEvent.KeyRelease):
+            modifiers = event.modifiers()
+
+            self._shift_only_down = (
+                (modifiers & Qt.ShiftModifier)
+                and not (modifiers & Qt.ControlModifier)
+            )
+
+            self.table.viewport().update()
+
         # -----------------
         # HANDLE VIEWPORT EVENTS
         # -----------------
         if obj is self.table.viewport():
-
             # -----------------
             # MOUSEWHELL WITH SHIFT FOR HORIZONTAL SCROLL
             # -----------------
@@ -340,7 +360,10 @@ class MainWindow(QMainWindow):
                         return True  # nothing to copy
 
                     self._clipboard_service_id = service_id
+                    self._clipboard_cell = (row, col)
                     print("[COPY] service_id =", service_id)
+
+                    self.table.viewport().update()
 
                     return True  # ⛔ consume event
 
@@ -620,6 +643,7 @@ class MainWindow(QMainWindow):
 
     def _setup_table(self):
         self.table = DragTableWidget(1, 31)
+        self.table.main_window = self
         self.table.setShowGrid(True)
 
         # Disable cell selection highlight
@@ -719,7 +743,12 @@ class MainWindow(QMainWindow):
     def open_preferences(self):
         dialog = PreferencesDialog(self.preferences, self)
         if dialog.exec():
+            old_prev_days = self.preferences.previous_days_shown
             self.preferences = dialog.preferences
+
+            if self.preferences.previous_days_shown != old_prev_days:
+                self.n_prev_days = self.preferences.previous_days_shown
+                self.finalize_table_setup()
 
 
     def open_about_dialog(self):
@@ -901,6 +930,38 @@ class MainWindow(QMainWindow):
             return "replace"
 
         return None
+    
+    def _paint_copy_rectangle(self, painter):
+        if self._clipboard_cell is None:
+            return
+
+        row, col = self._clipboard_cell
+
+        rect = self.table.visualRect(
+            self.table.model().index(row, col)
+        )
+        if not rect.isValid():
+            return
+        
+        rect = rect.adjusted(-1, -1, 1, 1)  # Slightly bigger than cell
+
+        pen = QPen(Qt.black)
+        pen.setStyle(Qt.DotLine)
+        pen.setWidth(3)
+
+        painter.setClipping(False)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(rect)
+
+    
+    def _should_show_copy_rect(self):
+        return (
+            self._clipboard_cell is not None
+            and self._clipboard_service_id is not None
+            and self._shift_only_down
+        )
+
 
 
 

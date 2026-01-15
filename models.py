@@ -2,9 +2,9 @@ import uuid
 import json
 from typing import Optional, Dict
 
-from PyQt5.QtWidgets import QTableWidget
+from PyQt5.QtWidgets import QTableWidget, QApplication
 from PyQt5.QtGui import QPainter, QPen, QColor
-from PyQt5.QtCore import Qt, QRect
+from PyQt5.QtCore import Qt, QRect, QEvent
 
 class Service:
     def __init__(self, name, short_name, hours, color_hex, id=None):
@@ -129,7 +129,14 @@ class DragTableWidget(QTableWidget):
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(self._drag_rect)
-        
+
+        # ----------------------
+        # Copy rectangle (FIX)
+        # ----------------------
+        mw = getattr(self, "main_window", None)
+        if mw and mw._should_show_copy_rect():
+            mw._paint_copy_rectangle(painter)
+
         painter.end()
 
     def _is_weekend_column(self, col):
