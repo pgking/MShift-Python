@@ -27,11 +27,8 @@ from PyQt5.QtWidgets import (
     QDialog,
     QPushButton,
     QFileDialog,
-    QHeaderView
-)
-from PyQt5.QtGui import (
-    QColor,
-    QBrush
+    QHeaderView,
+    QMenu
 )
 from PyQt5.QtCore import (
     Qt
@@ -431,9 +428,43 @@ class MainWindow(QMainWindow):
             tgt_day
         )
 
-        # Backend swap
-        src_month_data.set_service(src_person.id, src_day, target_service_id)
-        tgt_month_data.set_service(tgt_person.id, tgt_day, service_id)
+        mode = self.preferences.drag_drop_mode
+        if target_service_id is None:
+            # Empty target → always replace
+            self._replace_service(
+                src_person, src_day, src_month_data,
+                tgt_person, tgt_day, tgt_month_data
+            )
+
+        elif mode == "swap":
+            self._swap_services(
+                src_person, src_day, src_month_data,
+                tgt_person, tgt_day, tgt_month_data
+            )
+
+        elif mode == "replace":
+            self._replace_service(
+                src_person, src_day, src_month_data,
+                tgt_person, tgt_day, tgt_month_data
+            )
+
+        elif mode == "ask":
+            choice = self._ask_drag_drop_action(pos)
+            if choice is None:
+                return  # Cancelled
+            
+            if choice == "swap":
+                self._swap_services(
+                    src_person, src_day, src_month_data,
+                    tgt_person, tgt_day, tgt_month_data
+                )
+
+            elif choice == "replace":
+                self._replace_service(
+                    src_person, src_day, src_month_data,
+                    tgt_person, tgt_day, tgt_month_data
+                )
+
 
         # UI update
         # Clear both cells
@@ -441,22 +472,25 @@ class MainWindow(QMainWindow):
         self.table.removeCellWidget(src_row, src_col)
         self.table.removeCellWidget(tgt_row, tgt_col)
 
-        # Restore source cell if needed
-        if target_service_id is not None:
+        # Source cell
+        src_service_now = src_month_data.get_service(src_person.id, src_day)
+        if src_service_now is not None:
             src_combo = self._create_service_combo(
                 src_row,
                 src_col,
-                preset_service=target_service_id
+                preset_service=src_service_now
             )
             self.table.setCellWidget(src_row, src_col, src_combo)
 
-        # Set target cell
-        tgt_combo = self._create_service_combo(
-            tgt_row,
-            tgt_col,
-            preset_service=service_id
-        )
-        self.table.setCellWidget(tgt_row, tgt_col, tgt_combo)
+        # Target cell
+        tgt_service_now = tgt_month_data.get_service(tgt_person.id, tgt_day)
+        if tgt_service_now is not None:
+            tgt_combo = self._create_service_combo(
+                tgt_row,
+                tgt_col,
+                preset_service=tgt_service_now
+            )
+            self.table.setCellWidget(tgt_row, tgt_col, tgt_combo)
 
         del self._drag_source
         self.refresh_row_headers()
@@ -833,6 +867,43 @@ class MainWindow(QMainWindow):
 
             color = self.workload.status_color(summary.ratio)
             header.set_row_color(row_index, color)
+
+    def _swap_services(self, src_person, src_day, src_month_data,
+                   tgt_person, tgt_day, tgt_month_data):
+        src_service = src_month_data.get_service(src_person.id, src_day)
+        tgt_service = tgt_month_data.get_service(tgt_person.id, tgt_day)
+
+        src_month_data.set_service(src_person.id, src_day, tgt_service)
+        tgt_month_data.set_service(tgt_person.id, tgt_day, src_service)
+
+    def _replace_service(self, src_person, src_day, src_month_data,
+                     tgt_person, tgt_day, tgt_month_data):
+        src_service = src_month_data.get_service(src_person.id, src_day)
+
+        src_month_data.set_service(src_person.id, src_day, None)
+        tgt_month_data.set_service(tgt_person.id, tgt_day, src_service)
+
+    def _ask_drag_drop_action(self, viewport_pos):
+        """
+        Ask user what to do when dropping onto an occupied cell.
+        Returns: "swap", "replace", or None (cancel)
+        """
+        menu = QMenu(self)
+
+        swap_action = menu.addAction("Swap services")
+        replace_action = menu.addAction("Replace existing service")
+
+        chosen = menu.exec_(self.table.viewport().mapToGlobal(viewport_pos))
+
+        if chosen == swap_action:
+            return "swap"
+        if chosen == replace_action:
+            return "replace"
+
+        return None
+
+
+
 
 # -------------------------
 # APP ENTRY POINT

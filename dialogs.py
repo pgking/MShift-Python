@@ -11,7 +11,8 @@ from PyQt5.QtWidgets import (
     QWidget,
     QCheckBox,
     QStackedWidget,
-    QLabel
+    QLabel,
+    QComboBox
 )
 
 from PyQt5.QtGui import QColor
@@ -372,6 +373,10 @@ class PreferencesDialog(QDialog):
             self.paste_overwrite_checkbox.isChecked()
         )
 
+        self.preferences.drag_drop_mode = (
+            self.drag_mode_combo.currentData()
+        )
+
         super().accept()
 
     def _add_page(self, widget: QWidget):
@@ -400,6 +405,7 @@ class PreferencesDialog(QDialog):
         title.setStyleSheet("font-weight: bold;")
         title.setAlignment(Qt.AlignCenter)
 
+        # Copy and paste behavior
         self.paste_overwrite_checkbox = QCheckBox("Allow paste to overwrite existing services")
         self.paste_overwrite_checkbox.setChecked(self.preferences.paste_overwrite_existing)
 
@@ -407,6 +413,26 @@ class PreferencesDialog(QDialog):
         layout.addSpacing(10)
         layout.addWidget(self.paste_overwrite_checkbox)
         layout.addStretch()
+
+        # Drag and Drop behavior
+        drag_label = QLabel("When dragging a service onto another one :")
+        drag_label.setAlignment(Qt.AlignLeft)
+
+        self.drag_mode_combo = QComboBox()
+        self.drag_mode_combo.addItem("Swap services", "swap")
+        self.drag_mode_combo.addItem("Replace existing service", "replace")
+        self.drag_mode_combo.addItem("Ask on drop", "ask")
+
+        # Set current value from preferences
+        index = self.drag_mode_combo.findData(
+            self.preferences.drag_drop_mode
+        )
+        if index >= 0:
+            self.drag_mode_combo.setCurrentIndex(index)
+
+        layout.addSpacing(20)
+        layout.addWidget(drag_label)
+        layout.addWidget(self.drag_mode_combo)
 
         self._add_page(page)
 
