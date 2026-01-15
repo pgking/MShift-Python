@@ -9,8 +9,10 @@ from PyQt5.QtWidgets import (
     QColorDialog,
     QListWidget,
     QWidget,
-    QCheckBox
+    QCheckBox,
+    QStackedWidget
 )
+
 from PyQt5.QtGui import QColor
 from PyQt5.QtCore import Qt
 
@@ -303,31 +305,59 @@ class PreferencesDialog(QDialog):
     def __init__(self, preferences: Preferences, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Preferences")
+        self.resize(600, 400)
         
         # Work on COPY
         self.preferences = Preferences(**preferences.__dict__)
 
-        layout = QVBoxLayout(self)
+        # Main Layout
+        main_layout = QVBoxLayout()
 
-        self.paste_overwrite_wheckbox = QCheckBox("Allow paste to overwrite existing services")
-        self.paste_overwrite_wheckbox.setChecked(self.preferences.paste_overwrite_existing)
+        # ----------------------
+        # CENTER: split view
+        # ----------------------
+        center_layout = QHBoxLayout()
 
-        layout.addWidget(self.paste_overwrite_wheckbox)
+        # Left : categories
+        self.category_list = QListWidget()
+        self.category_list.addItems([
+            "General",
+            "Behavior",
+            "Shortcuts",
+            "Appearance"
+        ])
+        self.category_list.setFixedWidth(150)
+        self.category_list.setCurrentRow(0)
 
-        # Buttons
-        btn_layout = QHBoxLayout()
+        # Right : stacked widgets for category settings
+        self.pages = QStackedWidget()
+
+        center_layout.addWidget(self.category_list)
+        center_layout.addWidget(self.pages, 1)
+
+        main_layout.addLayout(center_layout)
+
+        # ----------------------
+        # BOTTOM BUTTONS
+        # ----------------------
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
         ok_btn = QPushButton("Save")
         cancel_btn = QPushButton("Cancel")
 
         ok_btn.clicked.connect(self.accept)
         cancel_btn.clicked.connect(self.reject)
 
-        btn_layout.addStretch()
-        btn_layout.addWidget(ok_btn)
-        btn_layout.addWidget(cancel_btn)
+        button_layout.addWidget(ok_btn)
+        button_layout.addWidget(cancel_btn)
 
-        layout.addLayout(btn_layout)
+        main_layout.addLayout(button_layout)
 
-    def accept(self):
-        self.preferences.paste_overwrite_existing = (self.paste_overwrite_wheckbox.isChecked())
-        super().accept()
+        self.category_list.currentRowChanged.connect(
+            self.pages.setCurrentIndex
+        )
+
+        for _ in range(self.category_list.count()):
+            page = QWidget()
+            self.pages.addWidget(page)
