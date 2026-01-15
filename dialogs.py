@@ -10,7 +10,8 @@ from PyQt5.QtWidgets import (
     QListWidget,
     QWidget,
     QCheckBox,
-    QStackedWidget
+    QStackedWidget,
+    QLabel
 )
 
 from PyQt5.QtGui import QColor
@@ -311,7 +312,7 @@ class PreferencesDialog(QDialog):
         self.preferences = Preferences(**preferences.__dict__)
 
         # Main Layout
-        main_layout = QVBoxLayout()
+        main_layout = QVBoxLayout(self)
 
         # ----------------------
         # CENTER: split view
@@ -331,6 +332,14 @@ class PreferencesDialog(QDialog):
 
         # Right : stacked widgets for category settings
         self.pages = QStackedWidget()
+        
+        # ----------------------
+        # PAGES
+        # ----------------------
+        self._build_general_page()
+        self._build_behavior_page()
+        self._build_shortcuts_page()
+        self._build_appearance_page()
 
         center_layout.addWidget(self.category_list)
         center_layout.addWidget(self.pages, 1)
@@ -358,6 +367,57 @@ class PreferencesDialog(QDialog):
             self.pages.setCurrentIndex
         )
 
-        for _ in range(self.category_list.count()):
-            page = QWidget()
-            self.pages.addWidget(page)
+    def accept(self):
+        self.preferences.paste_overwrite_existing = (
+            self.paste_overwrite_checkbox.isChecked()
+        )
+
+        super().accept()
+
+    def _add_page(self, widget: QWidget):
+        self.pages.addWidget(widget)
+
+    def _build_general_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        label = QLabel(
+            "General application settings.\n\n"
+            "These options affect overall behavior of the scheduler."
+        )
+        label.setAlignment(Qt.AlignTop | Qt.AlignCenter)
+
+        layout.addWidget(label)
+        layout.addStretch()
+
+        self._add_page(page)
+
+    def _build_behavior_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        title = QLabel("Behavior Settings")
+        title.setStyleSheet("font-weight: bold;")
+        title.setAlignment(Qt.AlignCenter)
+
+        self.paste_overwrite_checkbox = QCheckBox("Allow paste to overwrite existing services")
+        self.paste_overwrite_checkbox.setChecked(self.preferences.paste_overwrite_existing)
+
+        layout.addWidget(title)
+        layout.addSpacing(10)
+        layout.addWidget(self.paste_overwrite_checkbox)
+        layout.addStretch()
+
+        self._add_page(page)
+
+    def _build_shortcuts_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addStretch()
+        self._add_page(page)
+
+    def _build_appearance_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addStretch()
+        self._add_page(page)
