@@ -8,12 +8,14 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QColorDialog,
     QListWidget,
-    QWidget
+    QWidget,
+    QCheckBox
 )
 from PyQt5.QtGui import QColor
 from PyQt5.QtCore import Qt
 
 from models import Person, Service
+from preferences import Preferences
 
 class AddPersonDialog(QDialog):
     def __init__(self):
@@ -295,3 +297,37 @@ class ManageServicesDialog(QDialog):
         self.current_service = None
         self._refresh_service_list()
         self._clear_fields()
+
+
+class PreferencesDialog(QDialog):
+    def __init__(self, preferences: Preferences, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Preferences")
+        
+        # Work on COPY
+        self.preferences = Preferences(**preferences.__dict__)
+
+        layout = QVBoxLayout(self)
+
+        self.paste_overwrite_wheckbox = QCheckBox("Allow paste to overwrite existing services")
+        self.paste_overwrite_wheckbox.setChecked(self.preferences.paste_overwrite_existing)
+
+        layout.addWidget(self.paste_overwrite_wheckbox)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        ok_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+
+        btn_layout.addStretch()
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(btn_layout)
+
+    def accept(self):
+        self.preferences.paste_overwrite_existing = (self.paste_overwrite_wheckbox.isChecked())
+        super().accept()

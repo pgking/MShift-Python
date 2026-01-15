@@ -11,6 +11,7 @@ class MenuBar(QMenuBar):
         self._create_file_menu()
         self._create_services_menu()
         self._create_about_menu()
+        self._create_preferences_menu()
 
     def _create_file_menu(self):
         file_menu = self.addMenu("File")
@@ -70,3 +71,11 @@ class MenuBar(QMenuBar):
         about_action.triggered.connect(self.parent.open_about_dialog)
 
         about_menu.addAction(about_action)
+
+    def _create_preferences_menu(self):
+        prefs_menu = self.addMenu("Preferences")
+
+        prefs_action = QAction("Preferences", self)
+        prefs_action.triggered.connect(self.parent.open_preferences)
+
+        prefs_menu.addAction(prefs_action)

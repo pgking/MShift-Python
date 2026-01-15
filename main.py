@@ -4,7 +4,7 @@ import calendar
 from datetime import datetime
 
 from models import Person, Service, MonthData, DragTableWidget
-from dialogs import AddPersonDialog, AddServiceDialog, ManageServicesDialog
+from dialogs import AddPersonDialog, AddServiceDialog, ManageServicesDialog, PreferencesDialog
 from menu_bar import MenuBar
 from headers import ColoredVerticalHeader, ClickableHorizontalHeader
 from exporter import export_to_excel
@@ -12,6 +12,7 @@ from file_io import save_schedule, load_schedule
 from service_cell import ServiceCell
 from table_rebuilder import TableRebuilder
 from workload import WorkloadCalculator
+from preferences import Preferences
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -64,9 +65,6 @@ class MainWindow(QMainWindow):
         self._row_drag_source = None
         self._row_drag_target = None
 
-        # Previous days shown
-        self.n_prev_days = 3
-
         # Copy paste start
         self._clipboard_service_id = None
 
@@ -109,6 +107,11 @@ class MainWindow(QMainWindow):
 
         self.table_rebuilder = TableRebuilder(self)
         self.workload = WorkloadCalculator(schedule= self.schedule, services= self.services)
+
+        # Preferences
+        self.preferences = Preferences()
+        self.preferences.previous_days_shown = 3  # Default value
+        self.n_prev_days = self.preferences.previous_days_shown
 
         self._add_person_to_table(Person("Tiphaine",  "Angibaud", 100))
 
@@ -274,7 +277,12 @@ class MainWindow(QMainWindow):
                     
                     person, month_data, day = resolved
 
-                    # Backend write (single source of truth)
+                    existing = month_data.get_service(person.id, day)
+
+                    if existing is not None and not self.preferences.paste_overwrite_existing:
+                        return True # Silently refuse
+                    
+                    # Backend write (single source of truth) if allowed
                     month_data.set_service(person.id, day, self._clipboard_service_id)
 
                     # UI re-projection
@@ -309,7 +317,7 @@ class MainWindow(QMainWindow):
                 return True
 
             # -----------------
-            # RIGHT CLICK ON CELL (DELETE)
+            # RIGHT CLICK
             # -----------------
             if event.type() == event.MouseButtonPress and event.button() == Qt.RightButton:
                 # -----------------
@@ -339,6 +347,9 @@ class MainWindow(QMainWindow):
 
                     return True  # ⛔ consume event
 
+                # -----------------
+                # RIGHT CLICK TO DELETE
+                # -----------------
                 index = self.table.indexAt(event.pos())
                 if not index.isValid():
                     return True
@@ -670,6 +681,12 @@ class MainWindow(QMainWindow):
         if dialog.exec_() == QDialog.Accepted:
             self.rebuild_cells()
             self.refresh_row_headers()
+
+    def open_preferences(self):
+        dialog = PreferencesDialog(self.preferences, self)
+        if dialog.exec():
+            self.preferences = dialog.preferences
+
 
     def open_about_dialog(self):
         print("Open about dialog (not implemented yet)")
