@@ -947,7 +947,7 @@ class MainWindow(QMainWindow):
 
         pen = QPen(Qt.black)
         pen.setStyle(Qt.DotLine)
-        pen.setWidth(3)
+        pen.setWidth(2)
 
         painter.setClipping(False)
         painter.setPen(pen)
