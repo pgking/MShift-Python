@@ -1,3 +1,4 @@
+from cmath import rect
 from PyQt5.QtCore import Qt, QRect
 from PyQt5.QtWidgets import QHeaderView, QMenu
 from PyQt5.QtGui import QPainter, QPen, QColor, QBrush
@@ -125,3 +126,27 @@ class ClickableHorizontalHeader(QHeaderView):
 
         self.main_window.table_rebuilder.refresh_column_shading()
         self.main_window.refresh_row_headers()
+
+    def paintSection(self, painter, rect, logicalIndex):
+        super().paintSection(painter, rect, logicalIndex)
+
+        violations = self.main_window.get_day_service_violations_for_column(logicalIndex)
+        if not violations:
+            return
+
+        painter.save()
+
+        painter.setClipping(False)
+
+        inner = rect.adjusted(4, 4, -4, -4)
+
+        radius = 5
+        cx = inner.right() - radius
+        cy = inner.top() + radius
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(200, 0, 0))  # bright red, impossible to miss
+        painter.drawEllipse(cx - radius, cy - radius, radius * 2, radius * 2)
+
+        painter.restore()
+

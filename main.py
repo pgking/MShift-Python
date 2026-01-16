@@ -120,6 +120,9 @@ class MainWindow(QMainWindow):
         self.preferences = Preferences()
         self.n_prev_days = self.preferences.previous_days_shown
 
+        # Flags
+        self.day_service_violations = []
+
         self._add_person_to_table(Person("Tiphaine",  "Angibaud", 100))
 
         self.installEventFilter(self)
@@ -878,20 +881,19 @@ class MainWindow(QMainWindow):
     def finalize_table_setup(self):
         self.table_rebuilder.finalize()
         self.table_rebuilder.refresh_column_shading()
-
+        
         year = int(self.year_combo.currentText())
         month = self.month_combo.currentIndex() + 1
-        violations = evaluate_day_service_counts(
+
+        self.day_service_violations = evaluate_day_service_counts(
             month_data=self.schedule[(year, month)],
             people=self.people,
             services_by_id={s.id: s for s in self.services},
             year=year,
-            month=month,
+            month=month
         )
 
-        print("DAY SERVICE VIOLATIONS:")
-        for v in violations:
-            print(v.tooltip())
+        self.table.horizontalHeader().viewport().update()
 
 
     def refresh_row_headers(self):
@@ -977,6 +979,27 @@ class MainWindow(QMainWindow):
             and self._clipboard_service_id is not None
             and self._shift_only_down
         )
+    
+    def get_day_service_violations_for_column(self, column: int):
+        """
+        Returns a list of DayServiceViolation for the given table column.
+        Only for the current month view.
+        """
+        month = self.month_combo.currentIndex() + 1
+        year = int(self.year_combo.currentText())
+
+        # Resolve column → (month, day)
+        month_data, day = self._resolve_day_context(column)
+
+        # Only care about current visible month
+        if month_data.year != year or month_data.month != month:
+            return []
+
+        return [
+            v for v in self.day_service_violations
+            if v.day == day
+        ]
+
 
 
 
