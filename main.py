@@ -13,6 +13,7 @@ from service_cell import ServiceCell
 from table_rebuilder import TableRebuilder
 from workload import WorkloadCalculator
 from preferences import Preferences
+from rules import evaluate_day_service_counts
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -877,6 +878,21 @@ class MainWindow(QMainWindow):
     def finalize_table_setup(self):
         self.table_rebuilder.finalize()
         self.table_rebuilder.refresh_column_shading()
+
+        year = int(self.year_combo.currentText())
+        month = self.month_combo.currentIndex() + 1
+        violations = evaluate_day_service_counts(
+            month_data=self.schedule[(year, month)],
+            people=self.people,
+            services_by_id={s.id: s for s in self.services},
+            year=year,
+            month=month,
+        )
+
+        print("DAY SERVICE VIOLATIONS:")
+        for v in violations:
+            print(v.tooltip())
+
 
     def refresh_row_headers(self):
         month = self.month_combo.currentIndex() + 1
