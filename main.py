@@ -282,8 +282,14 @@ class MainWindow(QMainWindow):
                 # -----------------
                 modifiers = QApplication.keyboardModifiers()
                 if modifiers & Qt.ShiftModifier:
-                    if self._clipboard_service_id is None:
-                        return True
+                    # Decide whether paste is allowed based on preference
+                    if self.preferences.copy_paste_mode == "linked":
+                        if not self._clipboard_is_still_valid():
+                            return True
+                        
+                    elif self.preferences.copy_paste_mode == "persistent":
+                        if self._clipboard_service_id is None:
+                            return True
 
                     index = self.table.indexAt(event.pos())
                     if not index.isValid():
@@ -1002,9 +1008,8 @@ class MainWindow(QMainWindow):
     
     def _should_show_copy_rect(self):
         return (
-            self._clipboard_cell is not None
-            and self._clipboard_service_id is not None
-            and self._shift_only_down
+            self._shift_only_down and
+            self._clipboard_is_still_valid()
         )
     
     def apply_assignment_change(
@@ -1091,6 +1096,29 @@ class MainWindow(QMainWindow):
 
         # Fallback (should not happen)
         return QColor(0, 0, 0)
+    
+    def _clipboard_is_still_valid(self) -> bool:
+        """
+        Returns True if the copied cell still contains
+        the same service as when it was copied.
+        """
+        if self._clipboard_cell is None:
+            return False
+
+        if self._clipboard_service_id is None:
+            return False
+
+        row, col = self._clipboard_cell
+
+        resolved = self._resolve_person_cell(row, col)
+        if not resolved:
+            return False
+
+        person, month_data, day = resolved
+        current_service_id = month_data.get_service(person.id, day)
+
+        return current_service_id == self._clipboard_service_id
+
 
 
 

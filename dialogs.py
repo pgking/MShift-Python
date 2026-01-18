@@ -12,7 +12,9 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QStackedWidget,
     QLabel,
-    QComboBox
+    QComboBox,
+    QRadioButton,
+    QButtonGroup
 )
 
 from PyQt5.QtGui import QColor
@@ -333,6 +335,19 @@ class PreferencesDialog(QDialog):
 
         # Right : stacked widgets for category settings
         self.pages = QStackedWidget()
+
+        self.copy_linked_radio = QRadioButton(
+            "Copy is linked to the source cell (recommended)"
+        )
+        self.copy_persistent_radio = QRadioButton(
+            "Copy keeps the last service in memory"
+        )
+
+        if self.preferences.copy_paste_mode == "linked":
+            self.copy_linked_radio.setChecked(True)
+        else:
+            self.copy_persistent_radio.setChecked(True)
+
         
         # ----------------------
         # PAGES
@@ -381,6 +396,11 @@ class PreferencesDialog(QDialog):
             self.prev_days_spin.value()
         )
 
+        if self.copy_linked_radio.isChecked():
+            self.preferences.copy_paste_mode = "linked"
+        else:
+            self.preferences.copy_paste_mode = "persistent"
+
         super().accept()
 
     def _add_page(self, widget: QWidget):
@@ -417,13 +437,37 @@ class PreferencesDialog(QDialog):
         title.setStyleSheet("font-weight: bold;")
         title.setAlignment(Qt.AlignCenter)
 
+        layout.addWidget(title)
+        layout.addSpacing(10)
+
+        copy_title = QLabel("Copy / Paste behavior :")
+        copy_title.setStyleSheet("font-weight: bold;")
+
+        layout.addWidget(copy_title)
+        layout.addWidget(self.copy_linked_radio)
+        layout.addWidget(self.copy_persistent_radio)
+
+        layout.addSpacing(15)
+
         # Copy and paste behavior
         self.paste_overwrite_checkbox = QCheckBox("Allow paste to overwrite existing services")
         self.paste_overwrite_checkbox.setChecked(self.preferences.paste_overwrite_existing)
-
-        layout.addWidget(title)
-        layout.addSpacing(10)
+        
         layout.addWidget(self.paste_overwrite_checkbox)
+
+        layout.addSpacing(20)
+
+        # Copy and paste behavior radios
+        self.copy_paste_radios = QButtonGroup(page)
+        self.copy_paste_radios.addButton(self.copy_linked_radio)
+        self.copy_paste_radios.addButton(self.copy_persistent_radio)
+        self.copy_linked_radio.setToolTip(
+            "Paste only works if the original copied cell is unchanged"
+        )
+        self.copy_persistent_radio.setToolTip(
+            "Paste always uses the last copied service, even if the source cell changed"
+        )
+        
         layout.addStretch()
 
         # Drag and Drop behavior
