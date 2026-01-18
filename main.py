@@ -1,23 +1,14 @@
-import sys
-import calendar
+# ============================================================
+# 1. Imports
+# ============================================================
+
+# stdlib
 import json
 import os
+import sys
+import calendar
 
-from datetime import datetime
-
-from models import Person, Service, MonthData, DragTableWidget
-from dialogs import AddPersonDialog, AddServiceDialog, ManageServicesDialog, PreferencesDialog
-from menu_bar import MenuBar
-from headers import ColoredVerticalHeader, ClickableHorizontalHeader
-from exporter import export_to_excel
-from file_io import save_schedule, load_schedule
-from service_cell import ServiceCell
-from table_rebuilder import TableRebuilder
-from workload import WorkloadCalculator
-from preferences import Preferences
-from rules import evaluate_day_service_counts
-from app_state import AppState
-
+# Qt
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -44,10 +35,25 @@ from PyQt5.QtGui import (
     QPainter
 )
 
+# App modules
+from datetime import datetime
+from models import Person, Service, MonthData, DragTableWidget
+from dialogs import AddPersonDialog, AddServiceDialog, ManageServicesDialog, PreferencesDialog
+from menu_bar import MenuBar
+from headers import ColoredVerticalHeader, ClickableHorizontalHeader
+from exporter import export_to_excel
+from file_io import save_schedule, load_schedule
+from service_cell import ServiceCell
+from table_rebuilder import TableRebuilder
+from workload import WorkloadCalculator
+from preferences import Preferences
+from rules import evaluate_day_service_counts
+from app_state import AppState
 
-# -------------------------
-# MAIN WINDOW
-# -------------------------
+
+# ============================================================
+# 2. Main Window
+# ============================================================
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -81,13 +87,6 @@ class MainWindow(QMainWindow):
         self._clipboard_service_id = None
         self._clipboard_cell = None
         self._shift_only_down = False
-
-        '''self.people = []
-        self.services = [
-            Service("Jour", "J", 12, "#A3D5FF"),
-            Service("Nuit", "N", 12, "#FFD6A3"),
-            Service("Planning Familial", "GP", 8, "#C3B1E1"),
-        ]'''
 
         # =====================================================
         # 3. STATIC DOMAIN (never user-editable)
@@ -168,13 +167,69 @@ class MainWindow(QMainWindow):
         self.installEventFilter(self)
         self.finalize_table_setup()
 
-    def _load_month(self):
-        year = int(self.year_combo.currentText())
-        month = self.month_combo.currentIndex() + 1
-        key = (year, month)
+    # =====================================================
+    # 4. APP LIFECYCLE & PERSISTENCE
+    # =====================================================
+    def load_app_state(self):
+        path = self.app_state.get_app_state_path()
+        if not os.path.exists(path):
+            return False
 
-        if key not in self.schedule :
-            self.schedule[key] = MonthData(year, month)
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # Preferences
+        self.preferences = Preferences.from_dict(
+            data.get("preferences", {})
+        )
+        self.n_prev_days = self.preferences.previous_days_shown
+
+        # People
+        self.people = [
+            Person(**p) for p in data.get("people", [])
+        ]
+
+        # Services
+        self.services = [
+            Service(**s) for s in data.get("services", [])
+        ]
+
+        # Rows
+        self.rows = data.get("rows", [])
+        
+        # Restore last viewed month
+        if "last_year" in data and "last_month" in data:
+            self.year_combo.setCurrentText(str(data["last_year"]))
+            self.month_combo.setCurrentIndex(data["last_month"] - 1)
+
+        return True
+    
+    def open_preferences(self):
+        dialog = PreferencesDialog(self.preferences, self)
+        if dialog.exec():
+            self.preferences = dialog.preferences
+            self.n_prev_days = self.preferences.previous_days_shown
+            
+            # Rebuild if needed
+            self.finalize_table_setup()
+
+            # Persist app state
+            self.app_state.save_app_state(self)
+
+    def closeEvent(self, event):
+        self.app_state.save_app_state(self)
+        super().closeEvent(event)
+
+    # =====================================================
+    # 5. TABLE STRUCTURE & PROJECTION
+    # =====================================================
+    def finalize_table_setup(self):
+        self.table_rebuilder.finalize()
+        self.table_rebuilder.refresh_column_shading()
+        
+        self.recompute_current_month_violations()
+
+        self.table.horizontalHeader().viewport().update()
 
     def _populate_initial_rows(self):
         """Populate the ordered rows list with static sections.
@@ -186,82 +241,359 @@ class MainWindow(QMainWindow):
                 "label": section["label"]
             })
 
+    def refresh_row_headers(self):
+        month = self.month_combo.currentIndex() + 1
+        year = int(self.year_combo.currentText())
+        header = self.table.verticalHeader()
 
-    def _setup_action_buttons(self):
-        buttons_layout = QHBoxLayout()
+        # Set vertical headers
+        for row_index, row_data in enumerate(self.rows):
+            if row_data["type"] == "section":
+                continue
 
-        self.add_person_btn = QLabel("➕ Add Person")
-        self.add_service_btn = QLabel("➕ Add Service")
+            person = next(p for p in self.people if p.id == row_data["person_id"])
+            summary = self.workload.monthly_summary(person, year, month)
 
-        # Make them look clickable
-        self.add_person_btn.setStyleSheet(
-            "padding: 6px; border: 1px solid #888; border-radius: 4px;"
+            text = f"{person.short_name} ({int(summary.worked)}h / {int(summary.expected)}h)"
+            self.table.setVerticalHeaderItem(row_index, QTableWidgetItem(text))
+
+            color = self.workload.status_color(summary.ratio)
+            header.set_row_color(row_index, color)
+
+    # =====================================================
+    # 6. ASSIGNMENTS & RULES
+    # =====================================================
+    def apply_assignment_change(
+        self,
+        *,
+        person_id,
+        day,
+        service_id,
+        year=None,
+        month=None,
+        reason=None,   # optional, for debugging / logging
+    ):
+        """
+        Canonical entry point for ALL assignment mutations.
+
+        This method is responsible for:
+        - mutating backend state
+        - recomputing rule violations
+        - triggering minimal UI refresh
+
+        UI code MUST NOT call MonthData.set_service directly.
+        """
+        if year is None:
+            year = int(self.year_combo.currentText())
+        if month is None:
+            month = self.month_combo.currentIndex() + 1
+
+        month_data = self.schedule[(year, month)]
+        month_data.set_service(person_id, day, service_id)
+
+        # Recompute violations
+        self._recompute_day_service_violations()
+        
+        # Minimal UI refresh
+        self.table.horizontalHeader().viewport().update()
+
+    def _recompute_day_service_violations(self):
+        year = int(self.year_combo.currentText())
+        month = self.month_combo.currentIndex() + 1
+
+        month_data = self.schedule.get((year, month))
+        if month_data is None:
+            self.day_service_violations = []
+            return
+
+        self.day_service_violations = evaluate_day_service_counts(
+            month_data=month_data,
+            people=self.people,
+            services_by_id={s.id: s for s in self.services},
+            year=year,
+            month=month
         )
-        self.add_service_btn.setStyleSheet(
-            "padding: 6px; border: 1px solid #888; border-radius: 4px;"
+
+    def recompute_current_month_violations(self):
+        self._recompute_day_service_violations()
+
+    # =====================================================
+    # 7. COPY / PASTE
+    # =====================================================
+    def _clipboard_is_still_valid(self) -> bool:
+        """
+        Returns True if the copied cell still contains
+        the same service as when it was copied.
+        """
+        if self._clipboard_cell is None:
+            return False
+
+        if self._clipboard_service_id is None:
+            return False
+
+        row, col = self._clipboard_cell
+
+        resolved = self._resolve_person_cell(row, col)
+        if not resolved:
+            return False
+
+        person, month_data, day = resolved
+        current_service_id = month_data.get_service(person.id, day)
+
+        return current_service_id == self._clipboard_service_id
+    
+    def _should_show_copy_rect(self):
+        return (
+            self._shift_only_down and
+            self._clipboard_is_still_valid()
+        )
+    
+    def _paint_copy_rectangle(self, painter):
+        if self._clipboard_cell is None:
+            return
+
+        row, col = self._clipboard_cell
+
+        rect = self.table.visualRect(
+            self.table.model().index(row, col)
+        )
+        if not rect.isValid():
+            return
+        
+        rect = rect.adjusted(-1, -1, 1, 1)  # Slightly bigger than cell
+
+        pen = QPen(Qt.black)
+        pen.setStyle(Qt.DotLine)
+        pen.setWidth(2)
+
+        painter.setClipping(False)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(rect)
+
+    #def _handle_copy_paste_events(self, obj, event) -> bool:
+
+
+    # =====================================================
+    # 8. DRAG & DROP
+    # =====================================================
+    def _start_drag(self, index):
+        print("Drag start:", index.row(), index.column())
+        row = index.row()
+        col = index.column()
+
+        resolved = self._resolve_person_cell(row, col)
+        if not resolved:
+            print("Drag aborted : invalid cell")
+            return True
+        
+        person, month_data, day = resolved
+        service_id = month_data.get_service(person.id, day)
+
+        if service_id is None :
+            print("Drag aborted : empty cell")
+            return
+        
+        self._drag_source = (person.id, col, service_id)
+
+    def _replace_service(self, src_person, src_day, src_month_data,
+                     tgt_person, tgt_day, tgt_month_data):
+        
+        src_service_id = src_month_data.get_service(src_person.id, src_day)
+        if src_service_id is None:
+            return
+        
+        # Clear source
+        self.apply_assignment_change(
+            person_id=src_person.id,
+            day=src_day,
+            service_id=None,
+            reason="drag_replace_source"
         )
 
-        self.add_person_btn.setAlignment(Qt.AlignCenter)
-        self.add_service_btn.setAlignment(Qt.AlignCenter)
-
-        self.add_person_btn.mousePressEvent = self._open_add_person
-        self.add_service_btn.mousePressEvent = self._open_add_service
-
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(self.add_person_btn)
-        buttons_layout.addWidget(self.add_service_btn)
-        buttons_layout.addStretch()
-
-        self.main_layout.addLayout(buttons_layout)
-
-
-    def _add_person_to_table(self, person: Person):
-        self.people.append(person)
-
-        self.rows.append({
-            "type": "person",
-            "person_id": person.id
-        })
-
-        if self.table.rowCount() == 1 and self.table.verticalHeaderItem(0) is None:
-            row = 0
-        else:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-
-        self.table.setVerticalHeaderItem(
-            row,
-            QTableWidgetItem(person.short_name)
+        # Apply target
+        self.apply_assignment_change(
+            person_id=tgt_person.id,
+            day=tgt_day,
+            service_id=src_service_id,
+            reason="drag_replace_target"
         )
 
-        self.finalize_table_setup()
+    def _swap_services(self, src_person, src_day, src_month_data,
+                   tgt_person, tgt_day, tgt_month_data):
+        
+        src_service_id = src_month_data.get_service(src_person.id, src_day)
+        tgt_service_id = tgt_month_data.get_service(tgt_person.id, tgt_day)
 
+        if src_service_id is None and tgt_service_id is None:
+            return
+        
+        self.apply_assignment_change(
+            person_id=src_person.id,
+            day=src_day,
+            service_id=tgt_service_id,
+            reason="drag_swap_source"
+        )
 
-    def _open_add_person(self, event):
-        print("Add Person clicked")
-        dialog = AddPersonDialog()
-        if dialog.exec():
-           self._add_person_to_table(dialog.person)
+        self.apply_assignment_change(
+            person_id=tgt_person.id,
+            day=tgt_day,
+            service_id=src_service_id,
+            reason="drag_swap_target"
+        )
 
-    def _open_add_service(self, event):
-        print("Add Service clicked")
-        dialog = AddServiceDialog()
-        if dialog.exec():
-            self.services.append(dialog.service)
-            self.finalize_table_setup()
+    def _handle_drop(self, source_index, pos):
+        if not hasattr(self, "_drag_source") or self._drag_source is None:
+            return
+        
+        target = self.table.indexAt(pos)
+        if not target.isValid():
+            return
 
-    def eventFilter(self, obj, event):
+        print("Drop:", source_index.row(), source_index.column(), "->", target.row(), target.column())
+        
+        tgt_row = target.row()
+        tgt_col = target.column()
 
-        if event.type() in (QEvent.KeyPress, QEvent.KeyRelease):
-            modifiers = event.modifiers()
+        resolved_target = self._resolve_person_cell(tgt_row, tgt_col)
+        if not resolved_target:
+            return True
+        
+        tgt_person, tgt_month_data, tgt_day = resolved_target
 
-            self._shift_only_down = (
-                (modifiers & Qt.ShiftModifier)
-                and not (modifiers & Qt.ControlModifier)
+        src_person_id, src_col, service_id = self._drag_source
+        src_row = next(
+            i for i, r in enumerate(self.rows)
+            if r.get("person_id") == src_person_id
+        )
+
+        resolved_source = self._resolve_person_cell(src_row, src_col)
+        if not resolved_source:
+            return
+
+        src_person, src_month_data, src_day = resolved_source
+
+        target_service_id = tgt_month_data.get_service(
+            tgt_person.id,
+            tgt_day
+        )
+
+        mode = self.preferences.drag_drop_mode
+        if target_service_id is None:
+            # Empty target → always replace
+            self._replace_service(
+                src_person, src_day, src_month_data,
+                tgt_person, tgt_day, tgt_month_data
             )
 
-            self.table.viewport().update()
+        elif mode == "swap":
+            self._swap_services(
+                src_person, src_day, src_month_data,
+                tgt_person, tgt_day, tgt_month_data
+            )
 
+        elif mode == "replace":
+            self._replace_service(
+                src_person, src_day, src_month_data,
+                tgt_person, tgt_day, tgt_month_data
+            )
+
+        elif mode == "ask":
+            choice = self._ask_drag_drop_action(pos)
+            if choice is None:
+                return  # Cancelled
+            
+            if choice == "swap":
+                self._swap_services(
+                    src_person, src_day, src_month_data,
+                    tgt_person, tgt_day, tgt_month_data
+                )
+
+            elif choice == "replace":
+                self._replace_service(
+                    src_person, src_day, src_month_data,
+                    tgt_person, tgt_day, tgt_month_data
+                )
+
+
+        # UI update
+        # Clear both cells
+        src_row = next(i for i, r in enumerate(self.rows) if r.get("person_id") == src_person_id)
+        self.table.removeCellWidget(src_row, src_col)
+        self.table.removeCellWidget(tgt_row, tgt_col)
+
+        # Source cell
+        src_service_now = src_month_data.get_service(src_person.id, src_day)
+        if src_service_now is not None:
+            src_combo = self._create_service_combo(
+                src_row,
+                src_col,
+                preset_service=src_service_now
+            )
+            self.table.setCellWidget(src_row, src_col, src_combo)
+
+        # Target cell
+        tgt_service_now = tgt_month_data.get_service(tgt_person.id, tgt_day)
+        if tgt_service_now is not None:
+            tgt_combo = self._create_service_combo(
+                tgt_row,
+                tgt_col,
+                preset_service=tgt_service_now
+            )
+            self.table.setCellWidget(tgt_row, tgt_col, tgt_combo)
+
+        del self._drag_source
+        self.refresh_row_headers()
+
+    def _handle_row_drop(self):
+        if not self._row_dragging:
+            return
+        
+        source = self._row_drag_source
+        target = self._row_drag_target
+
+        if source is None or target is None or target == source:
+            self._reset_row_drag()
+            return
+        
+        # Remove old widgets from the source row
+        for col in range(self.table.columnCount()):
+            self.table.removeCellWidget(source, col)
+
+        # Get person rows only
+        person_row = self.rows.pop(source)
+
+        insert_index = target
+        if target > source:
+            insert_index -= 1
+
+        self.rows.insert(insert_index, person_row)
+
+        # Reset dragging flags
+        self._reset_row_drag()
+
+        # Clear vertical header colors
+        self.table.verticalHeader()._row_colors.clear()
+
+        self.finalize_table_setup()
+        self.app_state.save_app_state(self)
+
+
+    def _reset_row_drag(self):
+        self._row_dragging = False
+        self._row_drag_source = None
+        self._row_drag_target = None
+
+    #def _handle_drag_events(self, obj, event) -> bool:
+
+
+
+    # =====================================================
+    # 9. QT EVENTS
+    # =====================================================
+    def eventFilter(self, obj, event):
+        if self._handle_modifier_keys(event):
+            return True
         # -----------------
         # HANDLE VIEWPORT EVENTS
         # -----------------
@@ -454,193 +786,28 @@ class MainWindow(QMainWindow):
                 return True  # ⛔ consume the event
 
         return super().eventFilter(obj, event)
-
-    def _start_drag(self, index):
-        print("Drag start:", index.row(), index.column())
-        row = index.row()
-        col = index.column()
-
-        resolved = self._resolve_person_cell(row, col)
-        if not resolved:
-            print("Drag aborted : invalid cell")
-            return True
+    
+    def _handle_modifier_keys(self, event) -> bool:
+        if event.type() not in (QEvent.KeyPress, QEvent.KeyRelease):
+            return False
         
-        person, month_data, day = resolved
-        service_id = month_data.get_service(person.id, day)
+        modifiers = event.modifiers()
 
-        if service_id is None :
-            print("Drag aborted : empty cell")
-            return
-        
-        self._drag_source = (person.id, col, service_id)
-
-    def _handle_drop(self, source_index, pos):
-        if not hasattr(self, "_drag_source") or self._drag_source is None:
-            return
-        
-        target = self.table.indexAt(pos)
-        if not target.isValid():
-            return
-
-        print("Drop:", source_index.row(), source_index.column(), "->", target.row(), target.column())
-        
-        tgt_row = target.row()
-        tgt_col = target.column()
-
-        resolved_target = self._resolve_person_cell(tgt_row, tgt_col)
-        if not resolved_target:
-            return True
-        
-        tgt_person, tgt_month_data, tgt_day = resolved_target
-
-        src_person_id, src_col, service_id = self._drag_source
-        src_row = next(
-            i for i, r in enumerate(self.rows)
-            if r.get("person_id") == src_person_id
+        new_shift_only = (
+            (modifiers & Qt.ShiftModifier)
+            and not (modifiers & Qt.ControlModifier)
         )
 
-        resolved_source = self._resolve_person_cell(src_row, src_col)
-        if not resolved_source:
-            return
+        if new_shift_only != self._shift_only_down:
+            self._shift_only_down = new_shift_only
+            self.table.viewport().update()
 
-        src_person, src_month_data, src_day = resolved_source
+        return False
 
-        target_service_id = tgt_month_data.get_service(
-            tgt_person.id,
-            tgt_day
-        )
-
-        mode = self.preferences.drag_drop_mode
-        if target_service_id is None:
-            # Empty target → always replace
-            self._replace_service(
-                src_person, src_day, src_month_data,
-                tgt_person, tgt_day, tgt_month_data
-            )
-
-        elif mode == "swap":
-            self._swap_services(
-                src_person, src_day, src_month_data,
-                tgt_person, tgt_day, tgt_month_data
-            )
-
-        elif mode == "replace":
-            self._replace_service(
-                src_person, src_day, src_month_data,
-                tgt_person, tgt_day, tgt_month_data
-            )
-
-        elif mode == "ask":
-            choice = self._ask_drag_drop_action(pos)
-            if choice is None:
-                return  # Cancelled
-            
-            if choice == "swap":
-                self._swap_services(
-                    src_person, src_day, src_month_data,
-                    tgt_person, tgt_day, tgt_month_data
-                )
-
-            elif choice == "replace":
-                self._replace_service(
-                    src_person, src_day, src_month_data,
-                    tgt_person, tgt_day, tgt_month_data
-                )
-
-
-        # UI update
-        # Clear both cells
-        src_row = next(i for i, r in enumerate(self.rows) if r.get("person_id") == src_person_id)
-        self.table.removeCellWidget(src_row, src_col)
-        self.table.removeCellWidget(tgt_row, tgt_col)
-
-        # Source cell
-        src_service_now = src_month_data.get_service(src_person.id, src_day)
-        if src_service_now is not None:
-            src_combo = self._create_service_combo(
-                src_row,
-                src_col,
-                preset_service=src_service_now
-            )
-            self.table.setCellWidget(src_row, src_col, src_combo)
-
-        # Target cell
-        tgt_service_now = tgt_month_data.get_service(tgt_person.id, tgt_day)
-        if tgt_service_now is not None:
-            tgt_combo = self._create_service_combo(
-                tgt_row,
-                tgt_col,
-                preset_service=tgt_service_now
-            )
-            self.table.setCellWidget(tgt_row, tgt_col, tgt_combo)
-
-        del self._drag_source
-        self.refresh_row_headers()
-
-    def _handle_row_drop(self):
-        if not self._row_dragging:
-            return
-        
-        source = self._row_drag_source
-        target = self._row_drag_target
-
-        if source is None or target is None or target == source:
-            self._reset_row_drag()
-            return
-        
-        # Remove old widgets from the source row
-        for col in range(self.table.columnCount()):
-            self.table.removeCellWidget(source, col)
-
-        # Get person rows only
-        person_row = self.rows.pop(source)
-
-        insert_index = target
-        if target > source:
-            insert_index -= 1
-
-        self.rows.insert(insert_index, person_row)
-
-        # Reset dragging flags
-        self._reset_row_drag()
-
-        # Clear vertical header colors
-        self.table.verticalHeader()._row_colors.clear()
-
-        self.finalize_table_setup()
-
-
-    def _reset_row_drag(self):
-        self._row_dragging = False
-        self._row_drag_source = None
-        self._row_drag_target = None
-
-
-
-    def _open_cell_dropdown(self, row, column):
-        print(f"[OPEN DROPDOWN] row = {row}, column = {column}")
-        combo = self._ensure_combo(row, column)
-        if combo is None:
-            print("[OPEN DROPDOWN] combo is None")
-            return
-        
-        try:
-            combo.activated.disconnect()
-        except TypeError:
-            pass
-
-        combo.activated.connect(
-            lambda index, c=combo: c._service_cell.apply_service_by_index(index)
-        )
-
-        combo.showPopup()
-
-
-
-    # -------------------------
-    # UI SETUP
-    # -------------------------
-
+    
+    # =====================================================
+    # 10. UI Setup
+    # =====================================================
     def _setup_save_load_buttons(self):
         save_load_layout = QHBoxLayout()
 
@@ -742,6 +909,33 @@ class MainWindow(QMainWindow):
 
         self.main_layout.addWidget(self.table)
 
+    def _setup_action_buttons(self):
+        buttons_layout = QHBoxLayout()
+
+        self.add_person_btn = QLabel("➕ Add Person")
+        self.add_service_btn = QLabel("➕ Add Service")
+
+        # Make them look clickable
+        self.add_person_btn.setStyleSheet(
+            "padding: 6px; border: 1px solid #888; border-radius: 4px;"
+        )
+        self.add_service_btn.setStyleSheet(
+            "padding: 6px; border: 1px solid #888; border-radius: 4px;"
+        )
+
+        self.add_person_btn.setAlignment(Qt.AlignCenter)
+        self.add_service_btn.setAlignment(Qt.AlignCenter)
+
+        self.add_person_btn.mousePressEvent = self._open_add_person
+        self.add_service_btn.mousePressEvent = self._open_add_service
+
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(self.add_person_btn)
+        buttons_layout.addWidget(self.add_service_btn)
+        buttons_layout.addStretch()
+
+        self.main_layout.addLayout(buttons_layout)
+
     def _create_service_combo(self, row, column, preset_service = None):
         # Only allow combo for person rows
         row_data = self.rows[row]
@@ -782,6 +976,73 @@ class MainWindow(QMainWindow):
                 self.table.setCellWidget(row, column, combo)
 
         return combo
+    
+    # =====================================================
+    # 11. USER ACTIONS & DIALOGS
+    # =====================================================
+    def _add_person_to_table(self, person: Person):
+        self.people.append(person)
+
+        self.rows.append({
+            "type": "person",
+            "person_id": person.id
+        })
+
+        if self.table.rowCount() == 1 and self.table.verticalHeaderItem(0) is None:
+            row = 0
+        else:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+        self.table.setVerticalHeaderItem(
+            row,
+            QTableWidgetItem(person.short_name)
+        )
+
+        self.finalize_table_setup()
+        self.app_state.save_app_state(self)
+
+    def _open_add_person(self, event):
+        print("Add Person clicked")
+        dialog = AddPersonDialog()
+        if dialog.exec():
+           self._add_person_to_table(dialog.person)
+
+    def _open_add_service(self, event):
+        print("Add Service clicked")
+        dialog = AddServiceDialog()
+        if dialog.exec():
+            self.services.append(dialog.service)
+            self.finalize_table_setup()
+            self.app_state.save_app_state(self)
+
+    def open_about_dialog(self):
+        print("Open about dialog (not implemented yet)")
+
+    def _open_cell_dropdown(self, row, column):
+        print(f"[OPEN DROPDOWN] row = {row}, column = {column}")
+        combo = self._ensure_combo(row, column)
+        if combo is None:
+            print("[OPEN DROPDOWN] combo is None")
+            return
+        
+        try:
+            combo.activated.disconnect()
+        except TypeError:
+            pass
+
+        combo.activated.connect(
+            lambda index, c=combo: c._service_cell.apply_service_by_index(index)
+        )
+
+        combo.showPopup()
+
+    def open_services_dialog(self):
+        dialog = ManageServicesDialog(self.services)
+
+        if dialog.exec_() == QDialog.Accepted:
+            self.table_rebuilder.rebuild_cells()
+            self.refresh_row_headers()
 
     def quick_save(self):
         print("Quick save triggered (not implemented yet)")
@@ -791,27 +1052,6 @@ class MainWindow(QMainWindow):
         print("Save and exit triggered")
         self.quick_save()
         QApplication.quit()
-
-    def open_services_dialog(self):
-        dialog = ManageServicesDialog(self.services)
-
-        if dialog.exec_() == QDialog.Accepted:
-            self.table_rebuilder.rebuild_cells()
-            self.refresh_row_headers()
-
-    def open_preferences(self):
-        dialog = PreferencesDialog(self.preferences, self)
-        if dialog.exec():
-            old_prev_days = self.preferences.previous_days_shown
-            self.preferences = dialog.preferences
-
-            if self.preferences.previous_days_shown != old_prev_days:
-                self.n_prev_days = self.preferences.previous_days_shown
-                self.finalize_table_setup()
-
-
-    def open_about_dialog(self):
-        print("Open about dialog (not implemented yet)")
 
     def new_file(self):
         print("New file")
@@ -823,20 +1063,10 @@ class MainWindow(QMainWindow):
         # Reflect UI
         self.table_clear()
         self.finalize_table_setup()
-
-
-
-
-    # -------------------------
-    # LOGIC
-    # -------------------------
-
-    def table_clear(self):
-        """Clears all table content but keeps the table widget itself."""
-        self.table.clearContents()  # Clears all items
-        self.table.setRowCount(0)
-        self.table.setColumnCount(0)
-
+    
+    # =====================================================
+    # 12. FILE I/O (SCHEDULE-LEVEL)
+    # =====================================================
     def save_file(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save Schedule", "", "MShift File (*.mshift)")
         if not path:
@@ -857,6 +1087,9 @@ class MainWindow(QMainWindow):
         self.table_clear()
         self.finalize_table_setup()
 
+    # =====================================================
+    # 13. DOMAIN RESOLUTION HELPERS
+    # =====================================================
     def _resolve_person_cell(self, row: int, col: int):
         """
         Resolve a table cell into domain objects.
@@ -884,7 +1117,6 @@ class MainWindow(QMainWindow):
 
         month_data, day = self._resolve_day_context(col)
         return person, month_data, day
-
     
     def _resolve_day_context(self, column):
         month = self.month_combo.currentIndex() + 1
@@ -905,205 +1137,6 @@ class MainWindow(QMainWindow):
             self.schedule[key] = MonthData(*key)
 
         return self.schedule[key], day
-    
-    def _go_to_previous_month(self):
-        month = self.month_combo.currentIndex()
-        year = int(self.year_combo.currentText())
-
-        if month == 0:
-            self.month_combo.setCurrentIndex(11)
-            self.year_combo.setCurrentText(str(year - 1))
-        else:
-            self.month_combo.setCurrentIndex(month - 1)
-
-
-    def _go_to_next_month(self):
-        month = self.month_combo.currentIndex()
-        year = int(self.year_combo.currentText())
-
-        if month == 11:
-            self.month_combo.setCurrentIndex(0)
-            self.year_combo.setCurrentText(str(year + 1))
-        else:
-            self.month_combo.setCurrentIndex(month + 1)
-
-    def export_excel(self):
-        export_to_excel(self)
-
-    def finalize_table_setup(self):
-        self.table_rebuilder.finalize()
-        self.table_rebuilder.refresh_column_shading()
-        
-        self.recompute_current_month_violations()
-
-        self.table.horizontalHeader().viewport().update()
-
-
-    def refresh_row_headers(self):
-        month = self.month_combo.currentIndex() + 1
-        year = int(self.year_combo.currentText())
-        header = self.table.verticalHeader()
-
-        # Set vertical headers
-        for row_index, row_data in enumerate(self.rows):
-            if row_data["type"] == "section":
-                continue
-
-            person = next(p for p in self.people if p.id == row_data["person_id"])
-            summary = self.workload.monthly_summary(person, year, month)
-
-            text = f"{person.short_name} ({int(summary.worked)}h / {int(summary.expected)}h)"
-            self.table.setVerticalHeaderItem(row_index, QTableWidgetItem(text))
-
-            color = self.workload.status_color(summary.ratio)
-            header.set_row_color(row_index, color)
-
-    def _swap_services(self, src_person, src_day, src_month_data,
-                   tgt_person, tgt_day, tgt_month_data):
-        
-        src_service_id = src_month_data.get_service(src_person.id, src_day)
-        tgt_service_id = tgt_month_data.get_service(tgt_person.id, tgt_day)
-
-        if src_service_id is None and tgt_service_id is None:
-            return
-        
-        self.apply_assignment_change(
-            person_id=src_person.id,
-            day=src_day,
-            service_id=tgt_service_id,
-            reason="drag_swap_source"
-        )
-
-        self.apply_assignment_change(
-            person_id=tgt_person.id,
-            day=tgt_day,
-            service_id=src_service_id,
-            reason="drag_swap_target"
-        )
-
-    def _replace_service(self, src_person, src_day, src_month_data,
-                     tgt_person, tgt_day, tgt_month_data):
-        
-        src_service_id = src_month_data.get_service(src_person.id, src_day)
-        if src_service_id is None:
-            return
-
-        self.apply_assignment_change(
-            person_id=src_person.id,
-            day=src_day,
-            service_id=None,
-            reason="drag_replace_source_clear"
-        )
-
-        self.apply_assignment_change(
-            person_id=tgt_person.id,
-            day=tgt_day,
-            service_id=src_service_id,
-            reason="drag_replace_target_set"
-        )
-
-    def _ask_drag_drop_action(self, viewport_pos):
-        """
-        Ask user what to do when dropping onto an occupied cell.
-        Returns: "swap", "replace", or None (cancel)
-        """
-        menu = QMenu(self)
-
-        swap_action = menu.addAction("Swap services")
-        replace_action = menu.addAction("Replace existing service")
-
-        chosen = menu.exec_(self.table.viewport().mapToGlobal(viewport_pos))
-
-        if chosen == swap_action:
-            return "swap"
-        if chosen == replace_action:
-            return "replace"
-
-        return None
-    
-    def _paint_copy_rectangle(self, painter):
-        if self._clipboard_cell is None:
-            return
-
-        row, col = self._clipboard_cell
-
-        rect = self.table.visualRect(
-            self.table.model().index(row, col)
-        )
-        if not rect.isValid():
-            return
-        
-        rect = rect.adjusted(-1, -1, 1, 1)  # Slightly bigger than cell
-
-        pen = QPen(Qt.black)
-        pen.setStyle(Qt.DotLine)
-        pen.setWidth(2)
-
-        painter.setClipping(False)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRect(rect)
-
-    
-    def _should_show_copy_rect(self):
-        return (
-            self._shift_only_down and
-            self._clipboard_is_still_valid()
-        )
-    
-    def apply_assignment_change(
-        self,
-        *,
-        person_id,
-        day,
-        service_id,
-        year=None,
-        month=None,
-        reason=None,   # optional, for debugging / logging
-    ):
-        """
-        Canonical entry point for ALL assignment mutations.
-
-        This method is responsible for:
-        - mutating backend state
-        - recomputing rule violations
-        - triggering minimal UI refresh
-
-        UI code MUST NOT call MonthData.set_service directly.
-        """
-        if year is None:
-            year = int(self.year_combo.currentText())
-        if month is None:
-            month = self.month_combo.currentIndex() + 1
-
-        month_data = self.schedule[(year, month)]
-        month_data.set_service(person_id, day, service_id)
-
-        # Recompute violations
-        self._recompute_day_service_violations()
-        
-        # Minimal UI refresh
-        self.table.horizontalHeader().viewport().update()
-
-    def _recompute_day_service_violations(self):
-        year = int(self.year_combo.currentText())
-        month = self.month_combo.currentIndex() + 1
-
-        month_data = self.schedule.get((year, month))
-        if month_data is None:
-            self.day_service_violations = []
-            return
-
-        self.day_service_violations = evaluate_day_service_counts(
-            month_data=month_data,
-            people=self.people,
-            services_by_id={s.id: s for s in self.services},
-            year=year,
-            month=month
-        )
-
-    def recompute_current_month_violations(self):
-        self._recompute_day_service_violations()
 
     def get_day_service_violations_for_column(self, column: int):
         """
@@ -1136,76 +1169,78 @@ class MainWindow(QMainWindow):
         # Fallback (should not happen)
         return QColor(0, 0, 0)
     
-    def _clipboard_is_still_valid(self) -> bool:
+    # =====================================================
+    # 14. NAVIGATION & CALENDAR
+    # =====================================================
+    def _go_to_previous_month(self):
+        month = self.month_combo.currentIndex()
+        year = int(self.year_combo.currentText())
+
+        if month == 0:
+            self.month_combo.setCurrentIndex(11)
+            self.year_combo.setCurrentText(str(year - 1))
+        else:
+            self.month_combo.setCurrentIndex(month - 1)
+
+    def _go_to_next_month(self):
+        month = self.month_combo.currentIndex()
+        year = int(self.year_combo.currentText())
+
+        if month == 11:
+            self.month_combo.setCurrentIndex(0)
+            self.year_combo.setCurrentText(str(year + 1))
+        else:
+            self.month_combo.setCurrentIndex(month + 1)
+
+    def _load_month(self):
+        year = int(self.year_combo.currentText())
+        month = self.month_combo.currentIndex() + 1
+        key = (year, month)
+
+        if key not in self.schedule :
+            self.schedule[key] = MonthData(year, month)
+
+    # =====================================================
+    # 15. UTILITIES
+    # =====================================================
+    def table_clear(self):
+        """Clears all table content but keeps the table widget itself."""
+        self.table.clearContents()  # Clears all items
+        self.table.setRowCount(0)
+        self.table.setColumnCount(0)
+
+    def export_excel(self):
+        export_to_excel(self)
+
+    def _ask_drag_drop_action(self, viewport_pos):
         """
-        Returns True if the copied cell still contains
-        the same service as when it was copied.
+        Ask user what to do when dropping onto an occupied cell.
+        Returns: "swap", "replace", or None (cancel)
         """
-        if self._clipboard_cell is None:
-            return False
+        menu = QMenu(self)
 
-        if self._clipboard_service_id is None:
-            return False
+        swap_action = menu.addAction("Swap services")
+        replace_action = menu.addAction("Replace existing service")
 
-        row, col = self._clipboard_cell
+        chosen = menu.exec_(self.table.viewport().mapToGlobal(viewport_pos))
 
-        resolved = self._resolve_person_cell(row, col)
-        if not resolved:
-            return False
+        if chosen == swap_action:
+            return "swap"
+        if chosen == replace_action:
+            return "replace"
 
-        person, month_data, day = resolved
-        current_service_id = month_data.get_service(person.id, day)
-
-        return current_service_id == self._clipboard_service_id
-    
-    def load_app_state(self):
-        path = self.app_state.get_app_state_path()
-        if not os.path.exists(path):
-            return False
-
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        # Preferences
-        self.preferences = Preferences.from_dict(
-            data.get("preferences", {})
-        )
-        self.n_prev_days = self.preferences.previous_days_shown
-
-        # People
-        self.people = [
-            Person(**p) for p in data.get("people", [])
-        ]
-
-        # Services
-        self.services = [
-            Service(**s) for s in data.get("services", [])
-        ]
-
-        # Rows
-        self.rows = data.get("rows", [])
-        
-        # Restore last viewed month
-        if "last_year" in data and "last_month" in data:
-            self.year_combo.setCurrentText(str(data["last_year"]))
-            self.month_combo.setCurrentIndex(data["last_month"] - 1)
-
-        return True
+        return None
 
 
-
-
-
-# -------------------------
-# APP ENTRY POINT
-# -------------------------
+# =====================================================
+# 16. APP ENTRY POINT
+# =====================================================
 
 def main():
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
-
 
 if __name__ == "__main__":
     main()
