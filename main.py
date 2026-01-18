@@ -1,5 +1,7 @@
 import sys
 import calendar
+import json
+import os
 
 from datetime import datetime
 
@@ -14,6 +16,7 @@ from table_rebuilder import TableRebuilder
 from workload import WorkloadCalculator
 from preferences import Preferences
 from rules import evaluate_day_service_counts
+from app_state import AppState
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -50,44 +53,45 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        # =====================================================
+        # 1. WINDOW & MENU (pure UI shell, no state)
+        # =====================================================
         self.menu_bar = MenuBar(self)
         self.setMenuBar(self.menu_bar)
 
         self.setWindowTitle("mshift – Midwife Scheduler")
         self.resize(1100, 600)
 
-        # ---- Dragging setup
-        # Cells
+        # =====================================================
+        # 2. INPUT / INTERACTION STATE (ephemeral, never saved)
+        # =====================================================
+        # Dragging cells
         self._mouse_pressed_index = None
         self._mouse_press_pos = None
         self._dragging = False
         self._drag_rect = None
         self._drag_source = None
 
-        # Person rows
+        # Dragging person rows
         self._row_dragging = False
         self._row_drag_source = None
         self._row_drag_target = None
 
-        # Copy paste start
+        # Copy / Paste
         self._clipboard_service_id = None
         self._clipboard_cell = None
-
-        # Shift tracking for copy rectangle
         self._shift_only_down = False
 
-        self.people = []
+        '''self.people = []
         self.services = [
             Service("Jour", "J", 12, "#A3D5FF"),
             Service("Nuit", "N", 12, "#FFD6A3"),
             Service("Planning Familial", "GP", 8, "#C3B1E1"),
-        ]
+        ]'''
 
-        self.schedule = {} # key : (year, month) -> MonthData
-        self.current_month = None
-
-        # ---- HARD CODED SECTIONS ----
-        # Theses will never be edited by user
+        # =====================================================
+        # 3. STATIC DOMAIN (never user-editable)
+        # =====================================================
         self.sections = [
             {"id": "PMSI", "label": "PMSI"},
             {"id": "Suites", "label": "Suites de couches"},
@@ -99,34 +103,69 @@ class MainWindow(QMainWindow):
             {"id": "Vac&Cong", "label": "Vacataires et congés"}
         ]
 
-        # ---- CENTRAL WIDGET & LAYOUT
+        # =====================================================
+        # 4. CORE STATE CONTAINERS (will be filled by AppState)
+        # =====================================================
+        self.schedule = {}          # key : (year, month) -> MonthData
+        self.current_month = None
+        self.rows = []              # Ordered list of rows (sections + people)
+        self.people = []
+        self.services = []
+        self.preferences = None
+        self.n_prev_days = 0
+
+        self.day_service_violations = []
+
+        # =====================================================
+        # 5. APP STATE MANAGER
+        # =====================================================
+        self.app_state = AppState()
+
+        # =====================================================
+        # 6. CENTRAL WIDGET & LAYOUT (still no data)
+        # =====================================================
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
-
-        # Ordered list of rows (sections + people)
-        self.rows = []
-        self._populate_initial_rows()
 
         self._setup_save_load_buttons()
         self._setup_action_buttons()
         self._setup_controls()
         self._setup_table()
 
+        # =====================================================
+        # 7. HELPERS THAT DEPEND ON TABLE EXISTING
+        # =====================================================
         self.table_rebuilder = TableRebuilder(self)
         self.workload = WorkloadCalculator(schedule= self.schedule, services= self.services)
 
-        # Preferences
-        self.preferences = Preferences()
-        self.n_prev_days = self.preferences.previous_days_shown
+        # =====================================================
+        # 8. LOAD APP STATE OR FALL BACK TO DEFAULTS
+        # =====================================================
+        loaded = self.load_app_state()
+        if not loaded :
+            # ---- First launch defaults ----
+            self.preferences = Preferences()
+            self.n_prev_days = self.preferences.previous_days_shown
 
-        # Flags
-        self.day_service_violations = []
+            self.services = [
+                Service("Jour", "J", 12, "#A3D5FF"),
+                Service("Nuit", "N", 12, "#FFD6A3"),
+                Service("Planning Familial", "GP", 8, "#C3B1E1"),
+            ]
 
-        self._add_person_to_table(Person("Tiphaine",  "Angibaud", 100))
+            self.people = []
 
+            self.rows = []
+            self._populate_initial_rows()
+
+            # Optional dev seed
+            #self._add_person_to_table(Person("Tiphaine",  "Angibaud", 100))
+
+        # =====================================================
+        # 9. EVENT FILTERS & FINAL UI BUILD
+        # =====================================================
         self.installEventFilter(self)
-
         self.finalize_table_setup()
 
     def _load_month(self):
@@ -1118,9 +1157,40 @@ class MainWindow(QMainWindow):
         current_service_id = month_data.get_service(person.id, day)
 
         return current_service_id == self._clipboard_service_id
+    
+    def load_app_state(self):
+        path = self.app_state.get_app_state_path()
+        if not os.path.exists(path):
+            return False
 
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
+        # Preferences
+        self.preferences = Preferences.from_dict(
+            data.get("preferences", {})
+        )
+        self.n_prev_days = self.preferences.previous_days_shown
 
+        # People
+        self.people = [
+            Person(**p) for p in data.get("people", [])
+        ]
+
+        # Services
+        self.services = [
+            Service(**s) for s in data.get("services", [])
+        ]
+
+        # Rows
+        self.rows = data.get("rows", [])
+        
+        # Restore last viewed month
+        if "last_year" in data and "last_month" in data:
+            self.year_combo.setCurrentText(str(data["last_year"]))
+            self.month_combo.setCurrentIndex(data["last_month"] - 1)
+
+        return True
 
 
 

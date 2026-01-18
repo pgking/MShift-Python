@@ -449,7 +449,7 @@ class PreferencesDialog(QDialog):
 
         layout.addSpacing(15)
 
-        # Copy and paste behavior
+        # Paste overide behavior
         self.paste_overwrite_checkbox = QCheckBox("Allow paste to overwrite existing services")
         self.paste_overwrite_checkbox.setChecked(self.preferences.paste_overwrite_existing)
         
@@ -467,8 +467,6 @@ class PreferencesDialog(QDialog):
         self.copy_persistent_radio.setToolTip(
             "Paste always uses the last copied service, even if the source cell changed"
         )
-        
-        layout.addStretch()
 
         # Drag and Drop behavior
         drag_label = QLabel("When dragging a service onto another one :")
@@ -489,6 +487,7 @@ class PreferencesDialog(QDialog):
         layout.addSpacing(20)
         layout.addWidget(drag_label)
         layout.addWidget(self.drag_mode_combo)
+        layout.addStretch()
 
         self._add_page(page)
 

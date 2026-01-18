@@ -12,3 +12,10 @@ class Preferences:
     # Drag and drop behavior
     # Swap | Replace | Ask
     drag_drop_mode: str = "swap"
+
+    def to_dict(self):
+        return self.__dict__.copy()
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(**data)
