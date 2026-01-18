@@ -60,13 +60,24 @@ class ServiceCell:
             self._apply_style(None)
         else:
             service = self.services[index - 1]
-            self.month_data.set_service(self.person.id, self.day, service.id)
-            self.combo.setCurrentIndex(index)
+            service_id = service.id
+
+        self.main_window.apply_assignment_change(
+            person_id=self.person.id,
+            day=self.day,
+            service_id=service_id,
+            reason="combo_selection"
+        )
+
+        self.combo.setCurrentIndex(index)
+        if service:
             self.combo.setCurrentText(service.short_name)
-            self._apply_style(service)
+        
+        self._apply_style(service)
 
         self.combo.update()
         self.combo.repaint()
+        
         self.main_window.refresh_row_headers()
 
 

@@ -304,7 +304,12 @@ class MainWindow(QMainWindow):
                         return True # Silently refuse
                     
                     # Backend write (single source of truth) if allowed
-                    month_data.set_service(person.id, day, self._clipboard_service_id)
+                    self.apply_assignment_change(
+                        person_id=person.id,
+                        day=day,
+                        service_id=self._clipboard_service_id,
+                        reason="paste"
+                    )
 
                     # UI re-projection
                     self.table.removeCellWidget(row, col)
@@ -390,7 +395,12 @@ class MainWindow(QMainWindow):
                 service_id = month_data.get_service(person.id, day)
                 if service_id is not None:
                     # Backend removal
-                    month_data.set_service(person.id, day, None)
+                    self.apply_assignment_change(
+                        person_id=person.id,
+                        day=day,
+                        service_id=None,
+                        reason="delete"
+                    )
 
                     # UI update
                     self.table.removeCellWidget(row, column)
@@ -875,23 +885,11 @@ class MainWindow(QMainWindow):
     def export_excel(self):
         export_to_excel(self)
 
-
-    # REBUILDERS
-
     def finalize_table_setup(self):
         self.table_rebuilder.finalize()
         self.table_rebuilder.refresh_column_shading()
         
-        year = int(self.year_combo.currentText())
-        month = self.month_combo.currentIndex() + 1
-
-        self.day_service_violations = evaluate_day_service_counts(
-            month_data=self.schedule[(year, month)],
-            people=self.people,
-            services_by_id={s.id: s for s in self.services},
-            year=year,
-            month=month
-        )
+        self.recompute_current_month_violations()
 
         self.table.horizontalHeader().viewport().update()
 
@@ -917,18 +915,47 @@ class MainWindow(QMainWindow):
 
     def _swap_services(self, src_person, src_day, src_month_data,
                    tgt_person, tgt_day, tgt_month_data):
-        src_service = src_month_data.get_service(src_person.id, src_day)
-        tgt_service = tgt_month_data.get_service(tgt_person.id, tgt_day)
+        
+        src_service_id = src_month_data.get_service(src_person.id, src_day)
+        tgt_service_id = tgt_month_data.get_service(tgt_person.id, tgt_day)
 
-        src_month_data.set_service(src_person.id, src_day, tgt_service)
-        tgt_month_data.set_service(tgt_person.id, tgt_day, src_service)
+        if src_service_id is None and tgt_service_id is None:
+            return
+        
+        self.apply_assignment_change(
+            person_id=src_person.id,
+            day=src_day,
+            service_id=tgt_service_id,
+            reason="drag_swap_source"
+        )
+
+        self.apply_assignment_change(
+            person_id=tgt_person.id,
+            day=tgt_day,
+            service_id=src_service_id,
+            reason="drag_swap_target"
+        )
 
     def _replace_service(self, src_person, src_day, src_month_data,
                      tgt_person, tgt_day, tgt_month_data):
-        src_service = src_month_data.get_service(src_person.id, src_day)
+        
+        src_service_id = src_month_data.get_service(src_person.id, src_day)
+        if src_service_id is None:
+            return
 
-        src_month_data.set_service(src_person.id, src_day, None)
-        tgt_month_data.set_service(tgt_person.id, tgt_day, src_service)
+        self.apply_assignment_change(
+            person_id=src_person.id,
+            day=src_day,
+            service_id=None,
+            reason="drag_replace_source_clear"
+        )
+
+        self.apply_assignment_change(
+            person_id=tgt_person.id,
+            day=tgt_day,
+            service_id=src_service_id,
+            reason="drag_replace_target_set"
+        )
 
     def _ask_drag_drop_action(self, viewport_pos):
         """
@@ -980,6 +1007,60 @@ class MainWindow(QMainWindow):
             and self._shift_only_down
         )
     
+    def apply_assignment_change(
+        self,
+        *,
+        person_id,
+        day,
+        service_id,
+        year=None,
+        month=None,
+        reason=None,   # optional, for debugging / logging
+    ):
+        """
+        Canonical entry point for ALL assignment mutations.
+
+        This method is responsible for:
+        - mutating backend state
+        - recomputing rule violations
+        - triggering minimal UI refresh
+
+        UI code MUST NOT call MonthData.set_service directly.
+        """
+        if year is None:
+            year = int(self.year_combo.currentText())
+        if month is None:
+            month = self.month_combo.currentIndex() + 1
+
+        month_data = self.schedule[(year, month)]
+        month_data.set_service(person_id, day, service_id)
+
+        # Recompute violations
+        self._recompute_day_service_violations()
+        
+        # Minimal UI refresh
+        self.table.horizontalHeader().viewport().update()
+
+    def _recompute_day_service_violations(self):
+        year = int(self.year_combo.currentText())
+        month = self.month_combo.currentIndex() + 1
+
+        month_data = self.schedule.get((year, month))
+        if month_data is None:
+            self.day_service_violations = []
+            return
+
+        self.day_service_violations = evaluate_day_service_counts(
+            month_data=month_data,
+            people=self.people,
+            services_by_id={s.id: s for s in self.services},
+            year=year,
+            month=month
+        )
+
+    def recompute_current_month_violations(self):
+        self._recompute_day_service_violations()
+
     def get_day_service_violations_for_column(self, column: int):
         """
         Returns a list of DayServiceViolation for the given table column.
