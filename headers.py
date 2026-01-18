@@ -1,7 +1,8 @@
-from cmath import rect
-from PyQt5.QtCore import Qt, QRect
-from PyQt5.QtWidgets import QHeaderView, QMenu
-from PyQt5.QtGui import QPainter, QPen, QColor, QBrush
+from PyQt5.QtCore import Qt, QRect, QPoint
+from PyQt5.QtWidgets import QHeaderView, QMenu, QToolTip
+from PyQt5.QtGui import QPainter, QPen, QColor, QPolygon, QFont
+
+from rules import Severity
 
 class ColoredVerticalHeader(QHeaderView):
     def __init__(self, main_window, parent=None):
@@ -97,9 +98,14 @@ class ColoredVerticalHeader(QHeaderView):
         super().mouseReleaseEvent(event)
 
 class ClickableHorizontalHeader(QHeaderView):
+    ICON_SIZE = 13
+    ICON_SPACING = 4
+    ICON_MARGIN = 4
+
     def __init__(self, main_window, parent=None):
         super().__init__(Qt.Horizontal, parent)
         self.main_window = main_window
+        self.setMouseTracking(True)
         self.setSectionsClickable(True)
 
     def mousePressEvent(self, event):
@@ -135,18 +141,105 @@ class ClickableHorizontalHeader(QHeaderView):
             return
 
         painter.save()
-
         painter.setClipping(False)
 
-        inner = rect.adjusted(4, 4, -4, -4)
+        inner = rect.adjusted(
+            self.ICON_MARGIN,
+            self.ICON_MARGIN,
+            -self.ICON_MARGIN,
+            -self.ICON_MARGIN
+        )
 
-        radius = 5
-        cx = inner.right() - radius
-        cy = inner.top() + radius
+        icon_size = self.ICON_SIZE
+        spacing = self.ICON_SPACING
 
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(200, 0, 0))  # bright red, impossible to miss
-        painter.drawEllipse(cx - radius, cy - radius, radius * 2, radius * 2)
+        x = inner.right() - icon_size
+        y = inner.top()
+
+        for violation in violations:
+            if violation.severity == Severity.MISSING:
+                # 🔺 Triangle (pointing up)
+                half = icon_size // 2
+                triangle = QPolygon([
+                    QPoint(x, y + icon_size),
+                    QPoint(x + icon_size, y + icon_size),
+                    QPoint(x + half, y)
+                ])
+                color = self.main_window.get_service_color_for_kind(violation.service_kind)
+                painter.setBrush(color)
+                painter.setPen(Qt.NoPen)
+                painter.drawPolygon(triangle)
+
+            elif violation.severity == Severity.EXCESS:
+                # ❓ Question mark
+                color = self.main_window.get_service_color_for_kind(violation.service_kind)
+                painter.setPen(color)
+                font = painter.font()
+                font.setBold(True)
+                font.setPointSize(9)
+                painter.setFont(font)
+                painter.drawText(
+                    x,
+                    y + icon_size,
+                    icon_size,
+                    icon_size,
+                    Qt.AlignCenter,
+                    "?"
+                )
+
+            # Move down next symbol (vertical stacking)
+            y += icon_size + spacing
 
         painter.restore()
+
+    def _violation_icon_rects(self, rect, violations):
+        """
+        Returns a list of (violation, QRect) for hit-testing.
+        Must mirror paintSection geometry exactly.
+        """
+        icon_size = self.ICON_SIZE
+        spacing = self.ICON_SPACING
+
+        inner = rect.adjusted(
+            self.ICON_MARGIN,
+            self.ICON_MARGIN,
+            -self.ICON_MARGIN,
+            -self.ICON_MARGIN
+        )
+        x = inner.right() - icon_size
+        y = inner.top()
+
+        result = []
+
+        for violation in violations:
+            icon_rect = QRect(x, y, icon_size, icon_size)
+            result.append((violation, icon_rect))
+            y += icon_size + spacing
+
+        return result
+    
+    def mouseMoveEvent(self, event):
+        logical = self.logicalIndexAt(event.pos())
+        if logical < 0:
+            QToolTip.hideText()
+            return super().mouseMoveEvent(event)
+
+        x = self.sectionViewportPosition(logical)
+        w = self.sectionSize(logical)
+        rect = QRect(x, 0, w, self.height())
+        violations = self.main_window.get_day_service_violations_for_column(logical)
+
+        for violation, icon_rect in self._violation_icon_rects(rect, violations):
+            if icon_rect.contains(event.pos()):
+                QToolTip.showText(
+                    self.mapToGlobal(event.pos()),
+                    violation.tooltip(),
+                    self
+                )
+                return
+
+        QToolTip.hideText()
+        super().mouseMoveEvent(event)
+
+
 

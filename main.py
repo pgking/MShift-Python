@@ -741,7 +741,7 @@ class MainWindow(QMainWindow):
         dialog = ManageServicesDialog(self.services)
 
         if dialog.exec_() == QDialog.Accepted:
-            self.rebuild_cells()
+            self.table_rebuilder.rebuild_cells()
             self.refresh_row_headers()
 
     def open_preferences(self):
@@ -999,6 +999,18 @@ class MainWindow(QMainWindow):
             v for v in self.day_service_violations
             if v.day == day
         ]
+    
+    def get_service_color_for_kind(self, service_kind):
+        """
+        Returns QColor for Jour / Nuit service kind.
+        """
+        for service in self.services:
+            if service.name == service_kind.value:
+                return QColor(service.color_hex)
+
+        # Fallback (should not happen)
+        return QColor(0, 0, 0)
+
 
 
 
