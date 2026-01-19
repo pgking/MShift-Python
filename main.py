@@ -371,8 +371,88 @@ class MainWindow(QMainWindow):
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(rect)
 
-    #def _handle_copy_paste_events(self, obj, event) -> bool:
+    def _handle_copy_paste_events(self, obj, event) -> bool:
+        # Only handle viewports interactions
+        if obj is not self.table.viewport():
+            return False
+        
+        modifiers = QApplication.keyboardModifiers()
+        if not (modifiers & Qt.ShiftModifier):
+            return False
+        
+        # --------------------------------
+        # SHIFT + RIGHT CLICK → COPY
+        # --------------------------------
+        if event.type() == QEvent.MouseButtonPress and event.button() == Qt.RightButton:
+            index = self.table.indexAt(event.pos())
+            if not index.isValid():
+                return True
+            
+            resolved = self._resolve_person_cell(index.row(), index.column())
+            if not resolved:
+                return True
+            
+            person, month_data, day = resolved
+            service_id = month_data.get_service(person.id, day)
+            if service_id is None:
+                return True
+            
+            self._clipboard_service_id = service_id
+            self._clipboard_cell = (index.row(), index.column())
 
+            self.table.viewport().update()
+            return True
+        
+        # --------------------------------
+        # SHIFT + LEFT CLICK → PASTE
+        # --------------------------------
+        if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+            # Paste permission based on preference
+            if self.preferences.copy_paste_mode == "linked":
+                if not self._clipboard_is_still_valid():
+                    return True
+                
+            else : # Persistent
+                if self._clipboard_service_id is None:
+                    return True
+                
+            index = self.table.indexAt(event.pos())
+            if not index.isValid():
+                return True
+            
+            resolved = self._resolve_person_cell(index.row(), index.column())
+            if not resolved:
+                return True
+            
+            person, month_data, day = resolved
+            existing = month_data.get_service(person.id, day)
+
+            if existing is not None and not self.preferences.paste_overwrite_existing:
+                return True
+            
+            # Backend update
+            self.apply_assignment_change(
+                person_id=person.id,
+                day=day,
+                service_id=self._clipboard_service_id,
+                reason="paste"
+            )
+
+            # UI Reprojection
+            self.table.removeCellWidget(index.row(), index.column())
+
+            combo = self._create_service_combo(
+                index.row(),
+                index.column(),
+                preset_service=self._clipboard_service_id
+            )
+
+            self.table.setCellWidget(index.row(), index.column(), combo)
+
+            self.refresh_row_headers()
+            return True
+        
+        return False
 
     # =====================================================
     # 8. DRAG & DROP
@@ -584,8 +664,72 @@ class MainWindow(QMainWindow):
         self._row_drag_source = None
         self._row_drag_target = None
 
-    #def _handle_drag_events(self, obj, event) -> bool:
+    def _handle_drag_events(self, obj, event) -> bool:
+        # Only viewport events
+        if obj is not self.table.viewport():
+            return False
+        
+        # -----------------
+        # LEFT BUTTON PRESS
+        # -----------------
+        if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            index = self.table.indexAt(event.pos())
+            if not index.isValid():
+                return False
+            
+            self._mouse_pressed_index = index
+            self._mouse_press_pos = event.pos()
+            self._dragging = False
+            return False # Allow propagation
+        
+        # -----------------
+        # MOUSE MOVE (DRAG DETECTION)
+        # -----------------
+        if event.type() == QEvent.MouseMove and self._mouse_pressed_index is not None:
+            if self._mouse_press_pos is None:
+                return False
+            
+            distance = (event.pos() - self._mouse_press_pos).manhattanLength()
+            if distance > QApplication.startDragDistance():
+                if not self._dragging:
+                    self._dragging = True
+                    self._start_drag(self._mouse_pressed_index)
 
+                if self._drag_source is not None:
+                    target_index = self.table.indexAt(event.pos())
+                    if target_index.isValid():
+                        self.table.set_drag_rect(self.table.visualRect(target_index))
+
+                return True
+
+            return False
+        
+        # -----------------
+        # LEFT BUTTON RELEASE
+        # -----------------
+        if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+            if self._mouse_pressed_index is None:
+                return False
+            
+            if self._dragging:  # If you were dragging
+                self._handle_drop(self._mouse_pressed_index, event.pos())
+            else:               # If you just clicked
+                row = self._mouse_pressed_index.row()
+                col = self._mouse_pressed_index.column()
+                self._open_cell_dropdown(row, col)
+
+            # Reset Drag State
+            self._mouse_pressed_index = None
+            self._mouse_press_pos = None
+            self._dragging = False
+            self._drag_source = None
+
+            self.table.set_drag_rect(None)
+            self.table.viewport().update()
+
+            return True
+        
+        return False
 
 
     # =====================================================
@@ -593,6 +737,15 @@ class MainWindow(QMainWindow):
     # =====================================================
     def eventFilter(self, obj, event):
         if self._handle_modifier_keys(event):
+            return True
+        
+        if self._handle_copy_paste_events(obj, event):
+            return True
+        
+        if self._handle_drag_events(obj, event):
+            return True
+        
+        if self._handle_delete_event(obj, event):
             return True
         # -----------------
         # HANDLE VIEWPORT EVENTS
@@ -611,180 +764,7 @@ class MainWindow(QMainWindow):
                         bar = self.table.horizontalScrollBar()
                         bar.setValue(bar.value() - scroll_amount)  # minus to match natural scroll direction
                         return True  # consume event
-
-            # -----------------
-            # LEFT BUTTON PRESS
-            # -----------------
-            if event.type() == event.MouseButtonPress and event.button() == Qt.LeftButton:
-                index = self.table.indexAt(event.pos())
-                if not index.isValid():
-                    return True
-
-                self._mouse_pressed_index = index
-                self._mouse_press_pos = event.pos()
-                self._dragging = False
-                return True
-
-            # -------------
-            # MOUSE MOVE
-            # -------------
-            if event.type() == event.MouseMove:
-                if self._mouse_pressed_index is None:
-                    return False
-
-                if self._dragging:
-                    target_index = self.table.indexAt(event.pos())
-                    if target_index.isValid():
-                        self.table.set_drag_rect(self.table.visualRect(target_index))
-                    return True
-
-                distance = (event.pos() - self._mouse_press_pos).manhattanLength()
-                if distance > QApplication.startDragDistance():
-                    self._dragging = True
-                    self._start_drag(self._mouse_pressed_index)
-                    return True
-
-            # -----------------
-            # LEFT BUTTON RELEASE
-            # -----------------
-            if event.type() == event.MouseButtonRelease and event.button() == Qt.LeftButton:
-                # -----------------
-                # SHIFT + LEFT CLICK → PASTE SERVICE
-                # -----------------
-                modifiers = QApplication.keyboardModifiers()
-                if modifiers & Qt.ShiftModifier:
-                    # Decide whether paste is allowed based on preference
-                    if self.preferences.copy_paste_mode == "linked":
-                        if not self._clipboard_is_still_valid():
-                            return True
-                        
-                    elif self.preferences.copy_paste_mode == "persistent":
-                        if self._clipboard_service_id is None:
-                            return True
-
-                    index = self.table.indexAt(event.pos())
-                    if not index.isValid():
-                        return True
-
-                    row = index.row()
-                    col = index.column()
-
-                    resolved = self._resolve_person_cell(row, col)
-                    if not resolved:
-                        return True
                     
-                    person, month_data, day = resolved
-
-                    existing = month_data.get_service(person.id, day)
-
-                    if existing is not None and not self.preferences.paste_overwrite_existing:
-                        return True # Silently refuse
-                    
-                    # Backend write (single source of truth) if allowed
-                    self.apply_assignment_change(
-                        person_id=person.id,
-                        day=day,
-                        service_id=self._clipboard_service_id,
-                        reason="paste"
-                    )
-
-                    # UI re-projection
-                    self.table.removeCellWidget(row, col)
-
-                    combo = self._create_service_combo(
-                        row,
-                        col,
-                        preset_service=self._clipboard_service_id
-                    )
-                    self.table.setCellWidget(row, col, combo)
-
-                    self.refresh_row_headers()
-                    return True
-
-                if self._mouse_pressed_index is None:
-                    return False
-
-                index = self._mouse_pressed_index
-
-                if self._dragging:
-                    self._handle_drop(index, event.pos())
-                else:
-                    self._open_cell_dropdown(index.row(), index.column())
-
-                self._mouse_pressed_index = None
-                self._mouse_press_pos = None
-                self._dragging = False
-                self._drag_source = None
-                self.table.set_drag_rect(None)
-                self.table.viewport().update()
-                return True
-
-            # -----------------
-            # RIGHT CLICK
-            # -----------------
-            if event.type() == event.MouseButtonPress and event.button() == Qt.RightButton:
-                # -----------------
-                # SHIFT + RIGHT CLICK → COPY SERVICE
-                # -----------------
-                modifiers = QApplication.keyboardModifiers()
-                if modifiers & Qt.ShiftModifier:
-                    index = self.table.indexAt(event.pos())
-                    if not index.isValid():
-                        return True
-
-                    row = index.row()
-                    col = index.column()
-
-                    resolved = self._resolve_person_cell(row, col)
-                    if not resolved:
-                        return True
-                    
-                    person, month_data, day = resolved
-                    service_id = month_data.get_service(person.id, day)
-
-                    if service_id is None:
-                        return True  # nothing to copy
-
-                    self._clipboard_service_id = service_id
-                    self._clipboard_cell = (row, col)
-                    print("[COPY] service_id =", service_id)
-
-                    self.table.viewport().update()
-
-                    return True  # ⛔ consume event
-
-                # -----------------
-                # RIGHT CLICK TO DELETE
-                # -----------------
-                index = self.table.indexAt(event.pos())
-                if not index.isValid():
-                    return True
-
-                row = index.row()
-                column = index.column()
-
-                resolved = self._resolve_person_cell(row, column)
-                if not resolved:
-                    return True
-                
-                person, month_data, day = resolved
-
-                service_id = month_data.get_service(person.id, day)
-                if service_id is not None:
-                    # Backend removal
-                    self.apply_assignment_change(
-                        person_id=person.id,
-                        day=day,
-                        service_id=None,
-                        reason="delete"
-                    )
-
-                    # UI update
-                    self.table.removeCellWidget(row, column)
-                    self.refresh_row_headers()
-
-                return True  # ⛔ consume the event
-
         return super().eventFilter(obj, event)
     
     def _handle_modifier_keys(self, event) -> bool:
@@ -1230,6 +1210,50 @@ class MainWindow(QMainWindow):
             return "replace"
 
         return None
+    
+    def _handle_delete_event(self, obj, event) -> bool:
+        if obj is not self.table.viewport():
+            return False
+        
+        if event.type() != QEvent.MouseButtonPress:
+            return False
+        
+        if event.button() != Qt.RightButton:
+            return False
+        
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers & Qt.ShiftModifier:
+            return False # Shift + right click is copy, not delete
+        
+        index = self.table.indexAt(event.pos())
+        if not index.isValid():
+            return True
+        
+        row = index.row()
+        column = index.column()
+
+        resolved = self._resolve_person_cell(row, column)
+        if not resolved:
+            return True
+        
+        person, month_data, day = resolved
+        service_id = month_data.get_service(person.id, day)
+        if service_id is None:
+            return True
+        
+        # Backend removal
+        self.apply_assignment_change(
+            person_id=person.id,
+            day=day,
+            service_id=None,
+            reason="delete"
+        )
+
+        # UI update
+        self.table.removeCellWidget(row, column)
+        self.refresh_row_headers()
+
+        return True
 
 
 # =====================================================
