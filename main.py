@@ -783,6 +783,50 @@ class MainWindow(QMainWindow):
             self.table.viewport().update()
 
         return False
+    
+    def _handle_delete_event(self, obj, event) -> bool:
+        if obj is not self.table.viewport():
+            return False
+        
+        if event.type() != QEvent.MouseButtonPress:
+            return False
+        
+        if event.button() != Qt.RightButton:
+            return False
+        
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers & Qt.ShiftModifier:
+            return False # Shift + right click is copy, not delete
+        
+        index = self.table.indexAt(event.pos())
+        if not index.isValid():
+            return True
+        
+        row = index.row()
+        column = index.column()
+
+        resolved = self._resolve_person_cell(row, column)
+        if not resolved:
+            return True
+        
+        person, month_data, day = resolved
+        service_id = month_data.get_service(person.id, day)
+        if service_id is None:
+            return True
+        
+        # Backend removal
+        self.apply_assignment_change(
+            person_id=person.id,
+            day=day,
+            service_id=None,
+            reason="delete"
+        )
+
+        # UI update
+        self.table.removeCellWidget(row, column)
+        self.refresh_row_headers()
+
+        return True
 
     
     # =====================================================
@@ -1210,50 +1254,6 @@ class MainWindow(QMainWindow):
             return "replace"
 
         return None
-    
-    def _handle_delete_event(self, obj, event) -> bool:
-        if obj is not self.table.viewport():
-            return False
-        
-        if event.type() != QEvent.MouseButtonPress:
-            return False
-        
-        if event.button() != Qt.RightButton:
-            return False
-        
-        modifiers = QApplication.keyboardModifiers()
-        if modifiers & Qt.ShiftModifier:
-            return False # Shift + right click is copy, not delete
-        
-        index = self.table.indexAt(event.pos())
-        if not index.isValid():
-            return True
-        
-        row = index.row()
-        column = index.column()
-
-        resolved = self._resolve_person_cell(row, column)
-        if not resolved:
-            return True
-        
-        person, month_data, day = resolved
-        service_id = month_data.get_service(person.id, day)
-        if service_id is None:
-            return True
-        
-        # Backend removal
-        self.apply_assignment_change(
-            person_id=person.id,
-            day=day,
-            service_id=None,
-            reason="delete"
-        )
-
-        # UI update
-        self.table.removeCellWidget(row, column)
-        self.refresh_row_headers()
-
-        return True
 
 
 # =====================================================
