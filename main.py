@@ -27,7 +27,8 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import (
     Qt,
-    QEvent
+    QEvent,
+    QTimer
 )
 from PyQt5.QtGui import (
     QPen,
@@ -528,6 +529,11 @@ class MainWindow(QMainWindow):
         
         target = self.table.indexAt(pos)
         if not target.isValid():
+            return
+        
+        # Block if in previous month
+        if not self._is_column_in_current_month(target.column()):
+            self._abort_drag_with_feedback()
             return
 
         print("Drop:", source_index.row(), source_index.column(), "->", target.row(), target.column())
@@ -1193,6 +1199,18 @@ class MainWindow(QMainWindow):
         # Fallback (should not happen)
         return QColor(0, 0, 0)
     
+    def _is_column_in_current_month(self, column: int) -> bool:
+        month = self.month_combo.currentIndex() + 1
+        year = int(self.year_combo.currentText())
+
+        month_data, _ = self._resolve_day_context(column)
+
+        return (
+            month_data.year == year and
+            month_data.month == month
+        )
+
+    
     # =====================================================
     # 14. NAVIGATION & CALENDAR
     # =====================================================
@@ -1254,6 +1272,44 @@ class MainWindow(QMainWindow):
             return "replace"
 
         return None
+    
+    def _abort_drag_with_feedback(self):
+        # Clear drag visuals
+        self.table.set_drag_rect(None)
+        self.table.viewport().update()
+
+        # Reset drag state
+        self._drag_source = None
+
+        # Show gentle feedback
+        self._show_toast(
+            "This day belongs to the previous month.\nChange month to edit its schedule."
+        )
+
+    def _show_toast(self, text: str, duration_ms: int = 2000):
+        label = QLabel(text, self)
+        label.setStyleSheet("""
+            QLabel {
+                background-color: rgba(50, 50, 50, 220);
+                color: white;
+                padding: 8px 12px;
+                border-radius: 6px;
+                font-size: 11pt;
+            }
+        """)
+        label.setAlignment(Qt.AlignCenter)
+        label.adjustSize()
+
+        # Position: bottom center of the window
+        x = (self.width() - label.width()) // 2
+        y = self.height() - label.height() - 40
+        label.move(x, y)
+        label.show()
+
+        # Fade + auto-destroy
+        QTimer.singleShot(duration_ms, label.deleteLater)
+
+
 
 
 # =====================================================
