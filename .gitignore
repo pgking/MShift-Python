@@ -3,3 +3,4 @@
 /dist
 *.spec
 /Test
+Test/Excel test.xlsx
