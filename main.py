@@ -753,9 +753,7 @@ class MainWindow(QMainWindow):
         
         if self._handle_delete_event(obj, event):
             return True
-        # -----------------
-        # HANDLE VIEWPORT EVENTS
-        # -----------------
+            
         if obj is self.table.viewport():
             # -----------------
             # MOUSEWHELL WITH SHIFT FOR HORIZONTAL SCROLL

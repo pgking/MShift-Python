@@ -44,6 +44,7 @@ def export_to_excel(self):
         days_in_month = calendar.monthrange(year, month)[1]
         total_days = days_in_month + self.n_prev_days
         start_col = self.n_prev_days
+        last_col = total_days - 1
 
         # Row 1 days' short names
         for col in range(start_col, total_days):
@@ -65,14 +66,106 @@ def export_to_excel(self):
             cell.value = day
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
-        # Shade weekends and holidays
-        first_data_row = 3
-        last_data_row = first_data_row + len(self.people) - 1
-        max_row = ws.max_row
+        max_ratio_length = 0
+        ws.freeze_panes = "C3"
 
+        excel_row = 3
+        person_excel_rows = []
+
+        # Fill rows with services
+        for row_desc in self.rows:
+            # Section row
+            if row_desc["type"] == "section":
+                # Write label in first column
+                cell = ws.cell(row=excel_row, column=1, value=row_desc["label"])
+
+                # Merge two first cells
+                ws.merge_cells(
+                    start_row=excel_row,
+                    start_column=1,
+                    end_row=excel_row,
+                    end_column=2
+                )
+                # Merge across all day columns
+                ws.merge_cells(
+                    start_row=excel_row,
+                    start_column=3,
+                    end_row=excel_row,
+                    end_column=last_col
+                )
+
+                # Center the label
+                cell.alignment = Alignment(
+                    horizontal="center",
+                    vertical="center"
+                )
+                excel_row += 1
+                continue
+            
+            # Person row
+            if row_desc["type"] == "person":
+                person_id = row_desc["person_id"]
+                person = next(p for p in self.people if p.id == person_id)
+
+                # Column A: short_name
+                short_name = f"{person.short_name}  {person.percentage if person.percentage != 100 else ''}%"
+                ws.cell(row=excel_row, column=1, value=short_name)
+
+                # Column B : worked hours ratio
+                summary = self.workload.monthly_summary(person, year, month)
+                worked_hours = summary.worked
+                total_hours = summary.expected
+
+                ratio_float = 0 if total_hours == 0 else worked_hours / total_hours
+                ratio_str = f"{int(worked_hours)}h / {int(total_hours)}h"
+
+                cell_b = ws.cell(row=excel_row, column=2, value=ratio_str)
+                cell_b.alignment = Alignment(horizontal="center", vertical="center")
+
+                # ----- CONDITIONAL FORMATTING -----
+                if ratio_float < 0.9:
+                    fill_color = "ADD8FF"  # Light Blue
+                elif ratio_float > 1.1:
+                    fill_color = "FFB4B4"  # Light Red
+                else:
+                    fill_color = "B4E6B4"  # Light Green
+
+
+                ws.cell(row=excel_row, column=1).fill = PatternFill(
+                    start_color=fill_color,
+                    end_color=fill_color,
+                    fill_type="solid"
+                )
+                cell_b.fill = PatternFill(
+                    start_color=fill_color,
+                    end_color=fill_color,
+                    fill_type="solid"
+                )
+
+                max_ratio_length = max(max_ratio_length, len(ratio_str))
+
+                for col_offset, col in enumerate(range(start_col, total_days)):
+                    month_data, day = self._resolve_day_context(col)
+                    service_id = month_data.get_service(person.id, day)
+                    cell = ws.cell(row=excel_row, column=col_offset + 3)
+
+                    if service_id is None:
+                        cell.value = ""
+                        continue
+
+                    service = next((s for s in self.services if s.id == service_id), None)
+                    if service:
+                        cell.value = service.short_name
+                        cell.fill = PatternFill(start_color=service.color_hex.strip("#"),
+                                                end_color=service.color_hex.strip("#"),
+                                                fill_type="solid")
+                        cell.alignment = Alignment(horizontal="center", vertical="center")
+                person_excel_rows.append(excel_row)
+                excel_row += 1
+
+        # Shade weekends and holidays (PERSON ROWS ONLY)
         for col in range(start_col, total_days):
             month_data, day = self._resolve_day_context(col)
-
             excel_col = col - start_col + 3  # C = first day column
 
             is_weekend = calendar.weekday(
@@ -88,70 +181,12 @@ def export_to_excel(self):
 
             fill = holiday_fill if is_holiday else weekend_fill
 
-            for row in range(1, last_data_row + 1):
+            for row in person_excel_rows:
                 ws.cell(row=row, column=excel_col).fill = fill
 
 
-        max_ratio_length = 0
-        ws.freeze_panes = "C3"
-
-        # Fill rows with services
-        for row_idx, person in enumerate(self.people, start=2):
-            # Column A: short_name
-            short_name = f"{person.short_name}  {person.percentage if person.percentage != 100 else ''}%"
-            ws.cell(row=row_idx + 1, column=1, value=short_name)
-
-            # Column B : worked hours ratio
-            worked_hours = self._worked_hours_for_person(person, year, month)
-            total_hours = self._expected_hours_for_month(person, year, month)
-
-            ratio_float = 0 if total_hours == 0 else worked_hours / total_hours
-            ratio_str = f"{int(worked_hours)}h / {int(total_hours)}h"
-
-            cell_b = ws.cell(row=row_idx + 1, column=2, value=ratio_str)
-            cell_b.alignment = Alignment(horizontal="center", vertical="center")
-
-            # ----- CONDITIONAL FORMATTING -----
-            if ratio_float < 0.9:
-                fill_color = "ADD8FF"  # Light Blue
-            elif ratio_float > 1.1:
-                fill_color = "FFB4B4"  # Light Red
-            else:
-                fill_color = "B4E6B4"  # Light Green
-
-
-            ws.cell(row=row_idx + 1, column=1).fill = PatternFill(
-                start_color=fill_color,
-                end_color=fill_color,
-                fill_type="solid"
-            )
-            cell_b.fill = PatternFill(
-                start_color=fill_color,
-                end_color=fill_color,
-                fill_type="solid"
-            )
-
-            max_ratio_length = max(max_ratio_length, len(ratio_str))
-
-            for col_offset, col in enumerate(range(start_col, total_days)):
-                month_data, day = self._resolve_day_context(col)
-                service_id = month_data.get_service(person.id, day)
-                cell = ws.cell(row=row_idx + 1, column=col_offset + 3)
-
-                if service_id is None:
-                    cell.value = ""
-                    continue
-
-                service = next((s for s in self.services if s.id == service_id), None)
-                if service:
-                    cell.value = service.short_name
-                    cell.fill = PatternFill(start_color=service.color_hex.strip("#"),
-                                            end_color=service.color_hex.strip("#"),
-                                            fill_type="solid")
-                    cell.alignment = Alignment(horizontal="center", vertical="center")
-
         # Compute max length of names
-        max_name_length = max(len(person.short_name) for person in self.people)
+        max_name_length = max(len(person.short_name) for person in self.people) + 5
 
         # set column widths
         ws.column_dimensions['A'].width = max_name_length
