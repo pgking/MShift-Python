@@ -14,6 +14,12 @@ class TableRebuilder:
         self.table.setUpdatesEnabled(False)
 
         self.rebuild_structure_and_rows()
+        # Ensure section rows have no stray items
+        for row, row_data in enumerate(self.mw.rows):
+            if row_data["type"] == "section":
+                for col in range(self.table.columnCount()):
+                    self.table.takeItem(row, col)
+
         self.rebuild_cells()
         self.mw.refresh_row_headers()
 
@@ -81,11 +87,6 @@ class TableRebuilder:
 
         self.table.setVerticalHeaderItem(row_index, item)
 
-        for col in range(self.table.columnCount()):
-            cell = QTableWidgetItem("")
-            cell.setFlags(Qt.ItemIsEnabled)
-            self.table.setItem(row_index, col, cell)
-
     def rebuild_cells(self):
         for row_index, row_data in enumerate(self.mw.rows):
             if row_data["type"] != "person":
@@ -108,31 +109,11 @@ class TableRebuilder:
                 )
                 self.table.setCellWidget(row_index, col, combo)
 
-    def _shade_column_background(self, column, color: QColor):
-        # Shade a single column without refreshing everything
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, column)
-            if item is None:
-                item = QTableWidgetItem("")
-                item.setFlags(Qt.ItemIsEnabled)
-                self.table.setItem(row, column, item)
-            item.setBackground(color)
-
-    def clear_cell_backgrounds(self):
-        for row in range(self.table.rowCount()):
-            for col in range(self.table.columnCount()):
-                item = self.table.item(row, col)
-                if item is not None:
-                    item.setBackground(QBrush())
-
     def refresh_column_shading(self):
         """
         Apply all column-based shading (weekends + holidays).
         Must be called AFTER structure & headers exist.
         """
-
-        # First clear everything
-        self.clear_cell_backgrounds()
 
         # Ensure backend exists
         self.mw._load_month()
@@ -152,19 +133,26 @@ class TableRebuilder:
                 display_year, display_month = prev_year, prev_month
             else:
                 day = col - self.mw.n_prev_days + 1
-                key = (year, month)
                 display_year, display_month = year, month
+                key = (year, month)
 
             weekday = calendar.weekday(display_year, display_month, day)
 
-            # Weekends
-            if weekday >= 5:
-                self._shade_weekend_column(col)
+            # Decide background color
+            color = None
 
-            # Holidays
+            if weekday >= 5:
+                color = QColor(200, 200, 200)
+
             month_data = self.mw.schedule.get(key)
             if month_data and day in month_data.holidays:
-                self._shade_holiday_column(col, month_data)
+                color = QColor(200, 200, 200)
+
+            '''# Apply column background
+            if color:
+                self.table.setColumnBackground(col, color)
+            else:
+                self.table.setColumnBackground(col, QColor())'''
 
     def _shade_weekend_column(self, column):
         color = QColor(200, 200, 200)
