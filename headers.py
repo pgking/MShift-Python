@@ -130,10 +130,14 @@ class ClickableHorizontalHeader(QHeaderView):
         _, day = self.main_window._resolve_day_context(col)
         month_data.toggle_holiday(day)
 
-        self.main_window.table_rebuilder.refresh_column_shading()
-        self.main_window.refresh_row_headers()
+        self.main_window.table.viewport().update()
 
     def paintSection(self, painter, rect, logicalIndex):
+        if self.main_window.is_shaded_day(logicalIndex):
+            painter.save()
+            painter.fillRect(rect, QColor(200, 200, 200))
+            painter.restore()
+        
         super().paintSection(painter, rect, logicalIndex)
 
         violations = self.main_window.get_day_service_violations_for_column(logicalIndex)

@@ -226,7 +226,6 @@ class MainWindow(QMainWindow):
     # =====================================================
     def finalize_table_setup(self):
         self.table_rebuilder.finalize()
-        self.table_rebuilder.refresh_column_shading()
         
         self.recompute_current_month_violations()
 
@@ -1306,6 +1305,16 @@ class MainWindow(QMainWindow):
 
         # Fade + auto-destroy
         QTimer.singleShot(duration_ms, label.deleteLater)
+
+    def is_shaded_day(self, column: int) -> bool:
+        month_data, day = self._resolve_day_context(column)
+
+        weekday = calendar.weekday(month_data.year, month_data.month, day)
+        if weekday >= 5:
+            return True
+
+        return day in month_data.holidays
+
 
 
 

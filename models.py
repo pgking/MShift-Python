@@ -110,11 +110,11 @@ class DragTableWidget(QTableWidget):
         painter = QPainter(self.viewport())
 
         # ----------------------
-        # Weekend shading
+        # Column shading
         # ----------------------
         color = QColor(200, 200, 200, 120)
         for col in range(self.columnCount()):
-            if self._is_weekend_column(col):
+            if self._is_shaded_column(col):
                 for row in range(self.rowCount()):
                     rect = self.visualRect(self.model().index(row, col))
                     painter.fillRect(rect, color)
@@ -139,12 +139,9 @@ class DragTableWidget(QTableWidget):
 
         painter.end()
 
-    def _is_weekend_column(self, col):
-        if self.columnCount() == 0:
+    def _is_shaded_column(self, col: int) -> bool:
+        mw = getattr(self, "main_window", None)
+        if not mw:
             return False
-
-        header_item = self.horizontalHeaderItem(col)
-        if header_item:
-            day_name = header_item.text().split("\n")[0]
-            return day_name in ["Sam", "Dim"]
-        return False
+        
+        return mw.is_shaded_day(col)
