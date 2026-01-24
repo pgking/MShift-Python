@@ -45,7 +45,7 @@ class TableRebuilder:
         total_days = self.mw.n_prev_days + days_in_month
         self.table.setColumnCount(total_days)
 
-        # Create horizontal headers + shading
+        # Create horizontal headers
         for col in range(total_days):
             if col < self.mw.n_prev_days:
                 start_day = days_in_prev_month - self.mw.n_prev_days + 1
@@ -68,7 +68,7 @@ class TableRebuilder:
         self.mw.table.horizontalScrollBar().setValue(0)
 
     def rebuild_structure_and_rows(self):
-        # 1️⃣ Structure: rows, columns, horizontal headers, weekend shading
+        # 1️⃣ Structure: rows, columns, horizontal headers
         self.rebuild_structure()
 
         # 2️⃣ Vertical headers (sections + people)
