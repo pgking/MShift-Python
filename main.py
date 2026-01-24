@@ -779,10 +779,10 @@ class MainWindow(QMainWindow):
                     modifiers = QApplication.keyboardModifiers()
                     if modifiers & Qt.ShiftModifier:
                         delta = event.angleDelta().y()  # vertical wheel movement
-                        scroll_amount = int(delta / 32)  # Adjust scroll sensitivity
-                        # Scroll horizontally
+                        # Scroll horizontally: Down (negative delta) -> Right (value increase)
+                        # We divide by 2 to get a smooth speed (approx 1 column per tick)
                         bar = self.table.horizontalScrollBar()
-                        bar.setValue(bar.value() + scroll_amount)  # inverted for user preference
+                        bar.setValue(bar.value() - (delta // 12))
                         return True  # consume event
                     
         return super().eventFilter(obj, event)
