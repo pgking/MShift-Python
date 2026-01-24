@@ -36,6 +36,20 @@ class Person:
             return self.nom.title()
         
         return f"{self.prenom[0].upper()}. {self.nom.title()}"
+    
+    @property
+    def display_name(self) -> str:
+        """
+        Returns formatted name: 'Prénom NOM'
+        - Prénom: First letter capitalized, rest lowercase
+        - NOM: Fully uppercase
+        """
+        prenom_formatted = self.prenom.capitalize() if self.prenom else ""
+        nom_formatted = self.nom.upper()
+        
+        if prenom_formatted:
+            return f"{prenom_formatted} {nom_formatted}"
+        return nom_formatted
 
     def to_dict(self):
         return {
@@ -53,6 +67,7 @@ class MonthData:
         # key : (person.id, day)
         self.assignments = {}
         self.holidays = set()
+        self.comments = {} # person_id -> str
 
     def get_service(self, person_id, day):
         return self.assignments.get((person_id, day))
@@ -63,6 +78,15 @@ class MonthData:
         
         else :
             self.assignments[(person_id, day)] = service_id
+
+    def get_comment(self, person_id):
+        return self.comments.get(person_id, "")
+
+    def set_comment(self, person_id, text):
+        if not text:
+            self.comments.pop(person_id, None)
+        else:
+            self.comments[person_id] = text
 
     def toggle_holiday(self, day: int):
         if day in self.holidays:
@@ -78,7 +102,8 @@ class MonthData:
                 f"{person_id}_{day}": service_id
                 for (person_id, day), service_id in self.assignments.items()
             },
-            "holidays": list(self.holidays)
+            "holidays": list(self.holidays),
+            "comments": self.comments
         }
 
     @staticmethod
@@ -90,5 +115,6 @@ class MonthData:
             for pid, day in [k.split("_")]
         }
         month.holidays = set(data.get("holidays", []))
+        month.comments = data.get("comments", {})
         return month
         

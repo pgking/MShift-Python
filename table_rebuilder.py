@@ -1,6 +1,6 @@
 import calendar
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QTableWidgetItem
+from PyQt5.QtWidgets import QTableWidgetItem, QLineEdit
 from PyQt5.QtGui import QColor, QBrush
 
 
@@ -17,7 +17,10 @@ class TableRebuilder:
 
         # Column width
         for col in range(self.table.columnCount()):
-            self.table.setColumnWidth(col, 55)
+            if col == self.table.columnCount() - 1:
+                self.table.setColumnWidth(col, 200)
+            else:
+                self.table.setColumnWidth(col, 55)
         # Ensure section rows have no stray items
         for row, row_data in enumerate(self.mw.rows):
             if row_data["type"] == "section":
@@ -47,7 +50,7 @@ class TableRebuilder:
         days_in_month = calendar.monthrange(year, month)[1]
 
         total_days = self.mw.n_prev_days + days_in_month
-        self.table.setColumnCount(total_days)
+        self.table.setColumnCount(total_days + 1) # +1 for Notes column
 
         # Create horizontal headers
         for col in range(total_days):
@@ -67,6 +70,11 @@ class TableRebuilder:
             item = QTableWidgetItem((f"{weekday_short}\n{day}"))
             item.setTextAlignment(Qt.AlignCenter)
             self.table.setHorizontalHeaderItem(col, item)
+
+        # Last column header for Notes
+        notes_item = QTableWidgetItem("Notes")
+        notes_item.setTextAlignment(Qt.AlignCenter)
+        self.table.setHorizontalHeaderItem(total_days, notes_item)
 
         # Reset scroll to beginning
         self.mw.table.horizontalScrollBar().setValue(0)
@@ -99,6 +107,25 @@ class TableRebuilder:
             person = next(p for p in self.mw.people if p.id == row_data["person_id"])
             for col in range(self.table.columnCount()):
                 self.table.removeCellWidget(row_index, col)
+
+                # Special case for last column (Notes)
+                if col == self.table.columnCount() - 1:
+                    year = int(self.mw.year_combo.currentText())
+                    month = self.mw.month_combo.currentIndex() + 1
+                    month_data = self.mw.schedule.get((year, month))
+                    
+                    comment = ""
+                    if month_data:
+                        comment = month_data.get_comment(person.id)
+                    
+                    edit = QLineEdit(comment)
+                    edit.setFrame(False)
+                    # Use person_id logic to bind the edit
+                    edit.editingFinished.connect(
+                        lambda p_id=person.id, e=edit: self.mw.apply_comment_change(p_id, e.text())
+                    )
+                    self.table.setCellWidget(row_index, col, edit)
+                    continue
 
                 month_data, day = self.mw._resolve_day_context(col)
                 service_id = month_data.get_service(person.id, day)

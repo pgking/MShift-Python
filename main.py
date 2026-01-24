@@ -166,12 +166,8 @@ class MainWindow(QMainWindow):
             DEV_MODE = True  # ✅ Change to False for production
             
             if DEV_MODE:
-                # Add test people
-                self._add_person_to_table(Person("Tiphaine", "Angibaud", 100))
-                self._add_person_to_table(Person("Marie", "Dubois", 80))
-                self._add_person_to_table(Person("Sophie", "Martin", 100))
-                self._add_person_to_table(Person("Claire", "Bernard", 50))
-                self._add_person_to_table(Person("Julie", "Petit", 100))
+                from dev_seed import load_dev_data
+                load_dev_data(self)
 
         # =====================================================
         # 9. EVENT FILTERS & FINAL UI BUILD
@@ -265,7 +261,7 @@ class MainWindow(QMainWindow):
             person = next(p for p in self.people if p.id == row_data["person_id"])
             summary = self.workload.monthly_summary(person, year, month)
 
-            text = f"{person.short_name} ({int(summary.worked)}h / {int(summary.expected)}h)"
+            text = f"{person.display_name} ({int(summary.worked)}h / {int(summary.expected)}h)"
             self.table.setVerticalHeaderItem(row_index, QTableWidgetItem(text))
 
             color = self.workload.status_color(summary.ratio)
@@ -307,6 +303,16 @@ class MainWindow(QMainWindow):
         
         # Minimal UI refresh
         self.table.horizontalHeader().viewport().update()
+
+    def apply_comment_change(self, person_id, text):
+        """
+        Canonical entry point for comment mutations.
+        """
+        year = int(self.year_combo.currentText())
+        month = self.month_combo.currentIndex() + 1
+        
+        month_data = self.schedule[(year, month)]
+        month_data.set_comment(person_id, text)
 
     def _recompute_day_service_violations(self):
         year = int(self.year_combo.currentText())
@@ -776,7 +782,7 @@ class MainWindow(QMainWindow):
                         scroll_amount = int(delta / 32)  # Adjust scroll sensitivity
                         # Scroll horizontally
                         bar = self.table.horizontalScrollBar()
-                        bar.setValue(bar.value() - scroll_amount)  # minus to match natural scroll direction
+                        bar.setValue(bar.value() + scroll_amount)  # inverted for user preference
                         return True  # consume event
                     
         return super().eventFilter(obj, event)
@@ -1039,7 +1045,7 @@ class MainWindow(QMainWindow):
 
         self.table.setVerticalHeaderItem(
             row,
-            QTableWidgetItem(person.short_name)
+            QTableWidgetItem(person.display_name)
         )
 
         self.finalize_table_setup()
@@ -1186,6 +1192,9 @@ class MainWindow(QMainWindow):
         Returns a list of DayServiceViolation for the given table column.
         Only for the current month view.
         """
+        if column >= self.table.columnCount() - 1:
+            return []
+
         month = self.month_combo.currentIndex() + 1
         year = int(self.year_combo.currentText())
 
@@ -1323,6 +1332,9 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(duration_ms, label.deleteLater)
 
     def is_shaded_day(self, column: int) -> bool:
+        if column >= self.table.columnCount() - 1:
+            return False
+
         month_data, day = self._resolve_day_context(column)
 
         weekday = calendar.weekday(month_data.year, month_data.month, day)

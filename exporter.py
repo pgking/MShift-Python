@@ -50,23 +50,26 @@ def export_to_excel(self):
 
         # Row 1 days' short names
         for col in range(start_col, total_days):
-            month_data, day = self._resolve_day_context(col)
-
-            # Compute weekday short names
-            weekday_index = calendar.weekday(month_data.year, month_data.month, day)
+            m_data, day = self._resolve_day_context(col)
+            weekday_index = calendar.weekday(m_data.year, m_data.month, day)
             weekday_short = self.table.FRENCH_DAYS[weekday_index]
 
-            cell = ws.cell(row = 1, column = col - start_col + 3)
+            cell = ws.cell(row=1, column=col - start_col + 3)
             cell.value = weekday_short
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
         # Row 2 days numbers
         for col in range(start_col, total_days):
-            month_data, day = self._resolve_day_context(col)
-
-            cell = ws.cell(row = 2, column = col - start_col + 3)
+            _, day = self._resolve_day_context(col)
+            cell = ws.cell(row=2, column=col - start_col + 3)
             cell.value = day
             cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        # Row 1-2 Header for Notes
+        notes_header_col = total_days - start_col + 3
+        notes_header_cell = ws.cell(row=1, column=notes_header_col, value="NOTES")
+        notes_header_cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.merge_cells(start_row=1, start_column=notes_header_col, end_row=2, end_column=notes_header_col)
 
         max_ratio_length = 0
         ws.freeze_panes = "C3"
@@ -108,9 +111,12 @@ def export_to_excel(self):
                 person_id = row_desc["person_id"]
                 person = next(p for p in self.people if p.id == person_id)
 
-                # Column A: short_name
-                short_name = f"{person.short_name}  {person.percentage if person.percentage != 100 else ''}%"
-                ws.cell(row=excel_row, column=1, value=short_name)
+                # Column A: display_name with percentage (only if not 100%)
+                if person.percentage != 100:
+                    name_display = f"{person.display_name}  {person.percentage}%"
+                else:
+                    name_display = person.display_name
+                ws.cell(row=excel_row, column=1, value=name_display)
 
                 # Column B : worked hours ratio
                 summary = self.workload.monthly_summary(person, year, month)
@@ -185,6 +191,11 @@ def export_to_excel(self):
                         cell.fill = weekend_fill
                     else:  # empty
                         cell.value = ""
+                    
+                # Notes content
+                comment = month_data.get_comment(person.id)
+                ws.cell(row=excel_row, column=notes_header_col, value=comment)
+
                 excel_row += 1
 
         # Compute max length of names
