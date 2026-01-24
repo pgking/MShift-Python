@@ -2,10 +2,6 @@ import uuid
 import json
 from typing import Optional, Dict
 
-from PyQt5.QtWidgets import QTableWidget, QApplication
-from PyQt5.QtGui import QPainter, QPen, QColor
-from PyQt5.QtCore import Qt, QRect, QEvent
-
 class Service:
     def __init__(self, name, short_name, hours, color_hex, id=None):
         self.id = id or str(uuid.uuid4()) # Unique identifier
@@ -81,7 +77,8 @@ class MonthData:
             "assignments": {
                 f"{person_id}_{day}": service_id
                 for (person_id, day), service_id in self.assignments.items()
-            }
+            },
+            "holidays": list(self.holidays)
         }
 
     @staticmethod
@@ -92,56 +89,6 @@ class MonthData:
             for k, service_id in data["assignments"].items()
             for pid, day in [k.split("_")]
         }
+        month.holidays = set(data.get("holidays", []))
         return month
-
-class DragTableWidget(QTableWidget):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._drag_rect = None
-        self.FRENCH_DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
-
-    def set_drag_rect(self, rect: QRect | None):
-        self._drag_rect = rect
-        self.viewport().update()
-
-    def paintEvent(self, event):
-        super().paintEvent(event)  # draw table normally (headers + cells)
-
-        painter = QPainter(self.viewport())
-
-        # ----------------------
-        # Column shading
-        # ----------------------
-        color = QColor(200, 200, 200, 120)
-        for col in range(self.columnCount()):
-            if self._is_shaded_column(col):
-                for row in range(self.rowCount()):
-                    rect = self.visualRect(self.model().index(row, col))
-                    painter.fillRect(rect, color)
-
-        # ----------------------
-        # Drag rectangle
-        # ----------------------
-        if self._drag_rect:
-            pen = QPen(Qt.black)
-            pen.setStyle(Qt.DashLine)
-            pen.setWidth(2)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(self._drag_rect)
-
-        # ----------------------
-        # Copy rectangle
-        # ----------------------
-        mw = getattr(self, "main_window", None)
-        if mw and mw._should_show_copy_rect():
-            mw._paint_copy_rectangle(painter)
-
-        painter.end()
-
-    def _is_shaded_column(self, col: int) -> bool:
-        mw = getattr(self, "main_window", None)
-        if not mw:
-            return False
         
-        return mw.is_shaded_day(col)

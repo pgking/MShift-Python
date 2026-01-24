@@ -129,7 +129,10 @@ class ClickableHorizontalHeader(QHeaderView):
     def toggle_holiday(self, col, month_data):
         _, day = self.main_window._resolve_day_context(col)
         month_data.toggle_holiday(day)
-
+        
+        # Recompute violations after state change
+        self.main_window.recompute_current_month_violations()
+        
         self.main_window.table.viewport().update()
 
     def paintSection(self, painter, rect, logicalIndex):

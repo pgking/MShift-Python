@@ -38,7 +38,8 @@ from PyQt5.QtGui import (
 
 # App modules
 from datetime import datetime
-from models import Person, Service, MonthData, DragTableWidget
+from models import Person, Service, MonthData
+from drag_table_widget import DragTableWidget
 from dialogs import AddPersonDialog, AddServiceDialog, ManageServicesDialog, PreferencesDialog
 from menu_bar import MenuBar
 from headers import ColoredVerticalHeader, ClickableHorizontalHeader
@@ -159,8 +160,18 @@ class MainWindow(QMainWindow):
             self.rows = []
             self._populate_initial_rows()
 
-            # Optional dev seed
-            #self._add_person_to_table(Person("Tiphaine",  "Angibaud", 100))
+            # =====================================================
+            # DEV SEED DATA - Set to False for production
+            # =====================================================
+            DEV_MODE = True  # ✅ Change to False for production
+            
+            if DEV_MODE:
+                # Add test people
+                self._add_person_to_table(Person("Tiphaine", "Angibaud", 100))
+                self._add_person_to_table(Person("Marie", "Dubois", 80))
+                self._add_person_to_table(Person("Sophie", "Martin", 100))
+                self._add_person_to_table(Person("Claire", "Bernard", 50))
+                self._add_person_to_table(Person("Julie", "Petit", 100))
 
         # =====================================================
         # 9. EVENT FILTERS & FINAL UI BUILD
@@ -898,6 +909,11 @@ class MainWindow(QMainWindow):
         self.table = DragTableWidget(1, 31)
         self.table.main_window = self
         self.table.setShowGrid(True)
+        self.table.setStyleSheet("""
+            QTableWidget {
+                gridline-color: #B0B0B0;
+            }
+        """)
 
         # Disable cell selection highlight
         self.table.setSelectionMode(QTableWidget.NoSelection)
@@ -1314,6 +1330,12 @@ class MainWindow(QMainWindow):
             return True
 
         return day in month_data.holidays
+    
+    def is_section_row(self, row: int) -> bool:
+        if row < 0 or row >= len(self.rows):
+            return False
+        
+        return self.rows[row]["type"] == "section"
 
 
 

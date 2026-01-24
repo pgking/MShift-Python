@@ -3,6 +3,8 @@ import calendar
 from openpyxl.styles import PatternFill, Alignment
 from PyQt5.QtWidgets import QFileDialog
 
+from cell_authority import resolve_cell_appearance
+
 
 def export_to_excel(self):
         month = self.month_combo.currentIndex() + 1
@@ -30,8 +32,8 @@ def export_to_excel(self):
         )
 
         holiday_fill = PatternFill(
-            start_color="CCCCCC",
-            end_color="CCCCCC",
+            start_color="DDDDDD",
+            end_color="DDDDDD",
             fill_type="solid"
         )
 
@@ -70,7 +72,6 @@ def export_to_excel(self):
         ws.freeze_panes = "C3"
 
         excel_row = 3
-        person_excel_rows = []
 
         # Fill rows with services
         for row_desc in self.rows:
@@ -146,44 +147,45 @@ def export_to_excel(self):
 
                 for col_offset, col in enumerate(range(start_col, total_days)):
                     month_data, day = self._resolve_day_context(col)
-                    service_id = month_data.get_service(person.id, day)
                     cell = ws.cell(row=excel_row, column=col_offset + 3)
 
-                    if service_id is None:
-                        cell.value = ""
-                        continue
+                    service_id = month_data.get_service(person.id, day)
 
-                    service = next((s for s in self.services if s.id == service_id), None)
-                    if service:
-                        cell.value = service.short_name
-                        cell.fill = PatternFill(start_color=service.color_hex.strip("#"),
-                                                end_color=service.color_hex.strip("#"),
-                                                fill_type="solid")
+                    is_weekend = calendar.weekday(
+                        month_data.year,
+                        month_data.month,
+                        day
+                    ) >= 5
+
+                    is_holiday = day in month_data.holidays
+
+                    # --------------------------------------------------
+                    # Cell authority decision (single source of truth)
+                    # --------------------------------------------------
+                    appearance = resolve_cell_appearance(
+                        service_id, 
+                        is_holiday, 
+                        is_weekend, 
+                        self.services
+                    )
+
+                    if appearance.type == "service" and appearance.service:
+                        cell.value = appearance.service.short_name
+                        cell.fill = PatternFill(
+                            start_color=appearance.service.color_hex.strip("#"),
+                            end_color=appearance.service.color_hex.strip("#"),
+                            fill_type="solid"
+                        )
                         cell.alignment = Alignment(horizontal="center", vertical="center")
-                person_excel_rows.append(excel_row)
+                    elif appearance.type == "holiday":
+                        cell.value = ""
+                        cell.fill = holiday_fill
+                    elif appearance.type == "weekend":
+                        cell.value = ""
+                        cell.fill = weekend_fill
+                    else:  # empty
+                        cell.value = ""
                 excel_row += 1
-
-        # Shade weekends and holidays (PERSON ROWS ONLY)
-        for col in range(start_col, total_days):
-            month_data, day = self._resolve_day_context(col)
-            excel_col = col - start_col + 3  # C = first day column
-
-            is_weekend = calendar.weekday(
-                month_data.year,
-                month_data.month,
-                day
-            ) >= 5
-
-            is_holiday = day in month_data.holidays
-
-            if not is_weekend and not is_holiday:
-                continue
-
-            fill = holiday_fill if is_holiday else weekend_fill
-
-            for row in person_excel_rows:
-                ws.cell(row=row, column=excel_col).fill = fill
-
 
         # Compute max length of names
         max_name_length = max(len(person.short_name) for person in self.people) + 5

@@ -55,13 +55,15 @@ class ServiceCell:
         self._apply_style(None)
 
     def apply_service_by_index(self, index: int):
+        # Determine service_id from combo selection
         if index == 0:
-            self.month_data.set_service(self.person.id, self.day, None)
-            self._apply_style(None)
+            service_id = None
+            service = None
         else:
             service = self.services[index - 1]
             service_id = service.id
 
+        # ONLY call canonical entry point - no direct mutation
         self.main_window.apply_assignment_change(
             person_id=self.person.id,
             day=self.day,
@@ -69,12 +71,13 @@ class ServiceCell:
             reason="combo_selection"
         )
 
+        # UI update after backend is updated
         self.combo.setCurrentIndex(index)
         if service:
             self.combo.setCurrentText(service.short_name)
         
         self._apply_style(service)
-
+        
         self.combo.update()
         self.combo.repaint()
         

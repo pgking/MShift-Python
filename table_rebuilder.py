@@ -14,6 +14,10 @@ class TableRebuilder:
         self.table.setUpdatesEnabled(False)
 
         self.rebuild_structure_and_rows()
+
+        # Column width
+        for col in range(self.table.columnCount()):
+            self.table.setColumnWidth(col, 55)
         # Ensure section rows have no stray items
         for row, row_data in enumerate(self.mw.rows):
             if row_data["type"] == "section":
