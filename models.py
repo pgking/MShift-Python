@@ -131,7 +131,7 @@ class DragTableWidget(QTableWidget):
             painter.drawRect(self._drag_rect)
 
         # ----------------------
-        # Copy rectangle (FIX)
+        # Copy rectangle
         # ----------------------
         mw = getattr(self, "main_window", None)
         if mw and mw._should_show_copy_rect():
