@@ -50,7 +50,8 @@ class ServiceCell:
         self.combo.addItem("")  # empty = no service
 
         for service in self.services:
-            self.combo.addItem(service.name)
+            if service.is_visible:
+                self.combo.addItem(service.name)
 
         self._apply_style(None)
 
@@ -60,8 +61,14 @@ class ServiceCell:
             service_id = None
             service = None
         else:
-            service = self.services[index - 1]
-            service_id = service.id
+            # We must map back from combo text to correct service object
+            current_name = self.combo.itemText(index)
+            service = next((s for s in self.services if s.name == current_name), None)
+            if service:
+                service_id = service.id
+            else:
+                 # Should not happen unless corrupted
+                 return
 
         # ONLY call canonical entry point - no direct mutation
         self.main_window.apply_assignment_change(
@@ -81,7 +88,10 @@ class ServiceCell:
         self.combo.update()
         self.combo.repaint()
         
-        self.main_window.refresh_row_headers()
+        self.combo.update()
+        self.combo.repaint()
+        
+        # self.main_window.refresh_row_headers() -> Moved to apply_assignment_change
 
 
     # -------------------------
@@ -98,9 +108,22 @@ class ServiceCell:
             self.combo.setCurrentIndex(0)
             self._apply_style(None)
         else:
-            index = self.services.index(service) + 1
-            self.combo.setCurrentIndex(index)
-            self.combo.setCurrentText(service.short_name)
+            # We need to find the index in the COMBOBOX, not the full list
+            # Since combo only contains visible items, hidden items won't have an index > 0
+            if service.is_visible:
+                # Find index in the filtered list logic (tricky) or just match text
+                index = self.combo.findText(service.name)
+                if index >= 0:
+                    self.combo.setCurrentIndex(index)
+                    # Force display of short name
+                    self.combo.setCurrentText(service.short_name)
+            else:
+                # For hidden services, we can't select them in the dropdown
+                # But we can set the text manually? QComboBox only shows currentText if editable
+                # We set editable=True in setup, so this works.
+                self.combo.setCurrentIndex(-1)
+                self.combo.setEditText(service.short_name)
+
             self._apply_style(service)
         
         self.combo.blockSignals(False)

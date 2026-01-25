@@ -124,7 +124,7 @@ def export_to_excel(self):
                 total_hours = summary.expected
 
                 ratio_float = 0 if total_hours == 0 else worked_hours / total_hours
-                ratio_str = f"{int(worked_hours)}h / {int(total_hours)}h"
+                ratio_str = f"{worked_hours:g}h / {total_hours:g}h"
 
                 cell_b = ws.cell(row=excel_row, column=2, value=ratio_str)
                 cell_b.alignment = Alignment(horizontal="center", vertical="center")

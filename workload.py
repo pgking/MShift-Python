@@ -15,9 +15,16 @@ class MonthlyWorkSummary:
         return 0 if self.expected == 0 else self.worked / self.expected
     
 class WorkloadCalculator:
-    def __init__(self, schedule: dict, services: list[Service]):
-        self.schedule = schedule
-        self.services = services
+    def __init__(self, main_window):
+        self.main_window = main_window
+
+    @property
+    def schedule(self):
+        return self.main_window.schedule
+    
+    @property
+    def services(self):
+        return self.main_window.services
 
     def expected_hours_for_month(self, person: Person, year: int, month: int) -> float:
         weekdays = 0
@@ -50,7 +57,7 @@ class WorkloadCalculator:
 
             service = next((s for s in self.services if s.id == service_id), None)
             if service:
-                total_hours += service.hours
+                total_hours += service.get_duration(year, month, day, month_data.holidays)
 
         return total_hours
     

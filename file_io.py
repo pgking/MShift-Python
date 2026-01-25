@@ -49,6 +49,12 @@ def apply_loaded_data(main_window, data):
     # Rebuild people and services
     main_window.people = [Person(**p) for p in data["people"]]
     main_window.services = [Service(**s) for s in data ["services"]]
+    
+    # Ensure hidden "Unknown" service exists (for backward compatibility or new saves)
+    if not any(s.id == "unknown" for s in main_window.services):
+        main_window.services.append(
+            Service("Inconnu", "?", 0, "#FF5555", id="unknown", is_visible=False)
+        )
 
     # Rebuild row (sections and ordering)
     main_window.rows = data.get("rows", [])

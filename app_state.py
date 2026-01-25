@@ -21,7 +21,8 @@ class AppState:
             "services": [s.to_dict() for s in main_window.services],
             "rows": main_window.rows,
             "last_year": int(main_window.year_combo.currentText()),
-            "last_month": main_window.month_combo.currentIndex() + 1
+            "last_month": main_window.month_combo.currentIndex() + 1,
+            "recent_files": main_window.recent_files
         }
 
         with open(path, 'w', encoding='utf-8') as f:

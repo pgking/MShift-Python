@@ -44,6 +44,7 @@ from dialogs import AddPersonDialog, AddServiceDialog, ManageServicesDialog, Pre
 from menu_bar import MenuBar
 from headers import ColoredVerticalHeader, ClickableHorizontalHeader
 from exporter import export_to_excel
+from importer import import_from_excel
 from file_io import save_schedule, load_schedule
 from service_cell import ServiceCell
 from table_rebuilder import TableRebuilder
@@ -116,6 +117,13 @@ class MainWindow(QMainWindow):
         self.n_prev_days = 0
 
         self.day_service_violations = []
+        self.recent_files = []
+        
+        self.current_file_path = None
+        self.last_file_mtime = 0
+        self._watcher_timer = QTimer(self)
+        self._watcher_timer.setInterval(5000) # Check every 5 seconds
+        self._watcher_timer.timeout.connect(self._check_file_for_updates)
 
         # =====================================================
         # 5. APP STATE MANAGER
@@ -138,7 +146,8 @@ class MainWindow(QMainWindow):
         # 7. HELPERS THAT DEPEND ON TABLE EXISTING
         # =====================================================
         self.table_rebuilder = TableRebuilder(self)
-        self.workload = WorkloadCalculator(schedule= self.schedule, services= self.services)
+        self.table_rebuilder = TableRebuilder(self)
+        self.workload = WorkloadCalculator(self)
 
         # =====================================================
         # 8. LOAD APP STATE OR FALL BACK TO DEFAULTS
@@ -153,6 +162,7 @@ class MainWindow(QMainWindow):
                 Service("Jour", "J", 12, "#A3D5FF"),
                 Service("Nuit", "N", 12, "#FFD6A3"),
                 Service("Planning Familial", "GP", 8, "#C3B1E1"),
+                Service("Inconnu", "?", 0, "#FF5555", id="unknown", is_visible=False)
             ]
 
             self.people = []
@@ -174,6 +184,9 @@ class MainWindow(QMainWindow):
         # =====================================================
         self.installEventFilter(self)
         self.finalize_table_setup()
+        
+        # Initial refresh of menu
+        self.menu_bar.update_recent_menu(self.recent_files)
 
     # =====================================================
     # 4. APP LIFECYCLE & PERSISTENCE
@@ -210,6 +223,10 @@ class MainWindow(QMainWindow):
             self.year_combo.setCurrentText(str(data["last_year"]))
             self.month_combo.setCurrentIndex(data["last_month"] - 1)
 
+        # Recent Files
+        self.recent_files = data.get("recent_files", [])
+        # Cleanup invalid files might be good but let's keep it simple first
+        
         return True
     
     def open_preferences(self):
@@ -261,11 +278,14 @@ class MainWindow(QMainWindow):
             person = next(p for p in self.people if p.id == row_data["person_id"])
             summary = self.workload.monthly_summary(person, year, month)
 
-            text = f"{person.display_name} ({int(summary.worked)}h / {int(summary.expected)}h)"
+            text = f"{person.display_name} ({summary.worked:g}h / {summary.expected:g}h)"
             self.table.setVerticalHeaderItem(row_index, QTableWidgetItem(text))
 
             color = self.workload.status_color(summary.ratio)
             header.set_row_color(row_index, color)
+
+        # FORCE visual update of the vertical header
+        header.viewport().update()
 
     # =====================================================
     # 6. ASSIGNMENTS & RULES
@@ -303,6 +323,9 @@ class MainWindow(QMainWindow):
         
         # Minimal UI refresh
         self.table.horizontalHeader().viewport().update()
+        
+        # Update worked hours in row headers
+        self.refresh_row_headers()
 
     def apply_comment_change(self, person_id, text):
         """
@@ -1121,20 +1144,71 @@ class MainWindow(QMainWindow):
         if not path:
             return
         save_schedule(self, path)
+        self.current_file_path = os.path.abspath(path)
+        self.last_file_mtime = os.path.getmtime(path)
+        self._add_to_recent_files(path)
+        self._watcher_timer.start()
 
     def load_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load Schedule", "", "MShift File (*.mshift)")
         if not path:
             return
-        load_schedule(self, path)
+        
+        self.load_recent_file(path)
 
-        # Update workload calculator
-        self.workload.schedule = self.schedule
-        self.workload.services = self.services
+    def load_recent_file(self, path):
+        load_schedule(self, path)
+        self.current_file_path = os.path.abspath(path)
+        self.last_file_mtime = os.path.getmtime(path)
+        self._add_to_recent_files(path)
 
         # UI refresh
         self.table_clear()
         self.finalize_table_setup()
+        self._watcher_timer.start()
+
+    def _check_file_for_updates(self):
+        if not self.current_file_path or not os.path.exists(self.current_file_path):
+            return
+
+        try:
+            mtime = os.path.getmtime(self.current_file_path)
+            if mtime > self.last_file_mtime:
+                # File updated externally!
+                self.last_file_mtime = mtime # Prevent multiple prompts
+                
+                from PyQt5.QtWidgets import QMessageBox
+                choice = QMessageBox.question(
+                    self,
+                    "File Updated",
+                    f"The file '{os.path.basename(self.current_file_path)}' has been modified by another application (e.g., cloud sync).\n\n"
+                    "Would you like to reload it now?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                
+                if choice == QMessageBox.Yes:
+                    self.load_recent_file(self.current_file_path)
+        except Exception as e:
+            print(f"Error checking file for updates: {e}")
+
+    def _add_to_recent_files(self, path):
+        # normalize path
+        path = os.path.abspath(path)
+        
+        # remove if already in list to move to top
+        if path in self.recent_files:
+            self.recent_files.remove(path)
+            
+        self.recent_files.insert(0, path)
+        
+        # Limit to 3
+        self.recent_files = self.recent_files[:3]
+        
+        # Update UI
+        self.menu_bar.update_recent_menu(self.recent_files)
+        
+        # Persist
+        self.app_state.save_app_state(self)
 
     # =====================================================
     # 13. DOMAIN RESOLUTION HELPERS
@@ -1275,6 +1349,9 @@ class MainWindow(QMainWindow):
 
     def export_excel(self):
         export_to_excel(self)
+
+    def import_excel(self):
+        import_from_excel(self)
 
     def _ask_drag_drop_action(self, viewport_pos):
         """

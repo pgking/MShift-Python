@@ -132,6 +132,7 @@ class ClickableHorizontalHeader(QHeaderView):
         
         # Recompute violations after state change
         self.main_window.recompute_current_month_violations()
+        self.main_window.refresh_row_headers()
         
         self.main_window.table.viewport().update()
 

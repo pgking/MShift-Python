@@ -35,6 +35,9 @@ class MenuBar(QMenuBar):
         self.recent_menu = QMenu("Load Recent", self)
         # Filled dynamically later
 
+        import_menu = QMenu("Import", self)
+        import_menu.addAction("From Excel...", self.parent.import_excel)
+
         export_menu = QMenu("Export", self)
         export_menu.addAction("Excel", self.parent.export_excel)
 
@@ -50,6 +53,7 @@ class MenuBar(QMenuBar):
         file_menu.addAction(load_action)
         file_menu.addMenu(self.recent_menu)
         file_menu.addSeparator()
+        file_menu.addMenu(import_menu)
         file_menu.addMenu(export_menu)
         file_menu.addSeparator()
         file_menu.addAction(save_exit_action)
@@ -79,3 +83,21 @@ class MenuBar(QMenuBar):
         prefs_action.triggered.connect(self.parent.open_preferences)
 
         prefs_menu.addAction(prefs_action)
+
+    def update_recent_menu(self, paths):
+        import os
+        self.recent_menu.clear()
+        
+        if not paths:
+            no_recent_action = QAction("No recent files", self)
+            no_recent_action.setEnabled(False)
+            self.recent_menu.addAction(no_recent_action)
+            return
+
+        for path in paths:
+            filename = os.path.basename(path)
+            # Create an action for each file
+            action = QAction(filename, self)
+            action.setToolTip(path)
+            action.triggered.connect(lambda checked, p=path: self.parent.load_recent_file(p))
+            self.recent_menu.addAction(action)

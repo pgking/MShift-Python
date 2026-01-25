@@ -2,6 +2,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QLineEdit,
     QSpinBox,
+    QDoubleSpinBox,
     QFormLayout,
     QPushButton,
     QHBoxLayout,
@@ -103,9 +104,10 @@ class AddServiceDialog(QDialog):
 
         self.name_edit = QLineEdit()
         self.short_edit = QLineEdit()
-        self.hours_spin = QSpinBox()
-        self.hours_spin.setRange(6, 12)
+        self.hours_spin = QDoubleSpinBox()
+        self.hours_spin.setRange(0, 12)
         self.hours_spin.setValue(12)
+        self.hours_spin.setSingleStep(0.25)
 
         self.color_btn = QPushButton("Choisir couleur")
         self.color = QColor("#FFFFFF")
@@ -194,8 +196,9 @@ class ManageServicesDialog(QDialog):
 
         self.name_edit = QLineEdit()
         self.short_edit = QLineEdit()
-        self.hours_spin = QSpinBox()
-        self.hours_spin.setRange(7, 12)
+        self.hours_spin = QDoubleSpinBox()
+        self.hours_spin.setRange(0, 24)
+        self.hours_spin.setSingleStep(0.25)
         self.color_btn = QPushButton()
         self.color = QColor("#FFFFFF")
         self._update_color_button()

@@ -1,14 +1,33 @@
 import uuid
 import json
+import calendar
 from typing import Optional, Dict
 
 class Service:
-    def __init__(self, name, short_name, hours, color_hex, id=None):
+    def __init__(self, name, short_name, hours, color_hex, id=None, is_visible=True):
         self.id = id or str(uuid.uuid4()) # Unique identifier
         self.name = name
         self.short_name = short_name
         self.hours = hours
         self.color_hex = color_hex
+        self.is_visible = is_visible
+
+    def get_duration(self, year, month, day, holidays):
+        """
+        Returns the duration of the service for a specific date.
+        Handles special logic for services like 'CA' (Congés Annuels).
+        """
+        if self.short_name == "CA":
+            # Congés Annuels Logic:
+            # 7h per day, except weekends and holidays.
+            weekday = calendar.weekday(year, month, day)
+            if weekday >= 5: # Saturday=5, Sunday=6
+                return 0.0
+            if day in holidays:
+                return 0.0
+            return 7.0
+            
+        return float(self.hours)
 
     def to_dict(self):
         return {
@@ -16,7 +35,8 @@ class Service:
             "name": self.name,
             "short_name": self.short_name,
             "hours": self.hours,
-            "color_hex": self.color_hex
+            "color_hex": self.color_hex,
+            "is_visible": self.is_visible
         }
 
 class Person:
