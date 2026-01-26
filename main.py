@@ -53,7 +53,6 @@ from preferences import Preferences
 from rules import evaluate_day_service_counts
 from app_state import AppState
 
-
 # ============================================================
 # 2. Main Window
 # ============================================================
@@ -142,12 +141,11 @@ class MainWindow(QMainWindow):
         self._setup_controls()
         self._setup_table()
 
-        # =====================================================
         # 7. HELPERS THAT DEPEND ON TABLE EXISTING
         # =====================================================
         self.table_rebuilder = TableRebuilder(self)
-        self.table_rebuilder = TableRebuilder(self)
         self.workload = WorkloadCalculator(self)
+        self._is_saving_to_disk = False
 
         # =====================================================
         # 8. LOAD APP STATE OR FALL BACK TO DEFAULTS
@@ -178,6 +176,15 @@ class MainWindow(QMainWindow):
             if DEV_MODE:
                 from dev_seed import load_dev_data
                 load_dev_data(self)
+
+        # =====================================================
+        # 8b. AUTO-LOAD LAST FILE
+        # =====================================================
+        if self.recent_files:
+            last_file = self.recent_files[0]
+            if os.path.exists(last_file):
+                print(f"Auto-loading last file: {last_file}")
+                self.load_recent_file(last_file)
 
         # =====================================================
         # 9. EVENT FILTERS & FINAL UI BUILD
@@ -327,6 +334,11 @@ class MainWindow(QMainWindow):
         # Update worked hours in row headers
         self.refresh_row_headers()
 
+        # Auto-save if enabled
+        if self.preferences and self.preferences.auto_save:
+            self.quick_save()
+
+
     def apply_comment_change(self, person_id, text):
         """
         Canonical entry point for comment mutations.
@@ -336,6 +348,9 @@ class MainWindow(QMainWindow):
         
         month_data = self.schedule[(year, month)]
         month_data.set_comment(person_id, text)
+
+        if self.preferences.auto_save:
+            self.quick_save()
 
     def _recompute_day_service_violations(self):
         year = int(self.year_combo.currentText())
@@ -498,7 +513,6 @@ class MainWindow(QMainWindow):
     # 8. DRAG & DROP
     # =====================================================
     def _start_drag(self, index):
-        print("Drag start:", index.row(), index.column())
         row = index.row()
         col = index.column()
 
@@ -574,8 +588,6 @@ class MainWindow(QMainWindow):
         if not self._is_column_in_current_month(target.column()):
             self._abort_drag_with_feedback()
             return
-
-        print("Drop:", source_index.row(), source_index.column(), "->", target.row(), target.column())
         
         tgt_row = target.row()
         tgt_col = target.column()
@@ -702,6 +714,10 @@ class MainWindow(QMainWindow):
 
         self.finalize_table_setup()
         self.app_state.save_app_state(self)
+
+        if self.preferences.auto_save:
+            self.quick_save()
+
 
 
     def _reset_row_drag(self):
@@ -1074,6 +1090,9 @@ class MainWindow(QMainWindow):
         self.finalize_table_setup()
         self.app_state.save_app_state(self)
 
+        if self.preferences.auto_save:
+            self.quick_save()
+
     def _open_add_person(self, event):
         print("Add Person clicked")
         dialog = AddPersonDialog()
@@ -1087,6 +1106,9 @@ class MainWindow(QMainWindow):
             self.services.append(dialog.service)
             self.finalize_table_setup()
             self.app_state.save_app_state(self)
+
+            if self.preferences.auto_save:
+                self.quick_save()
 
     def open_about_dialog(self):
         print("Open about dialog (not implemented yet)")
@@ -1117,8 +1139,16 @@ class MainWindow(QMainWindow):
             self.refresh_row_headers()
 
     def quick_save(self):
-        print("Quick save triggered (not implemented yet)")
-        self.save_file()
+        if self.current_file_path:
+            self._is_saving_to_disk = True
+            try:
+                save_schedule(self, self.current_file_path)
+                # Wait a tiny bit for the OS to finalize the write
+                self.last_file_mtime = os.path.getmtime(self.current_file_path)
+            finally:
+                self._is_saving_to_disk = False
+        else:
+            self.save_file()
 
     def save_and_exit(self):
         print("Save and exit triggered")
@@ -1140,12 +1170,16 @@ class MainWindow(QMainWindow):
     # 12. FILE I/O (SCHEDULE-LEVEL)
     # =====================================================
     def save_file(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Save Schedule", "", "MShift File (*.mshift)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save Schedule", self.current_file_path or "", "MShift File (*.mshift)")
         if not path:
             return
-        save_schedule(self, path)
-        self.current_file_path = os.path.abspath(path)
-        self.last_file_mtime = os.path.getmtime(path)
+        self._is_saving_to_disk = True
+        try:
+            save_schedule(self, path)
+            self.current_file_path = os.path.abspath(path)
+            self.last_file_mtime = os.path.getmtime(path)
+        finally:
+            self._is_saving_to_disk = False
         self._add_to_recent_files(path)
         self._watcher_timer.start()
 
@@ -1168,12 +1202,16 @@ class MainWindow(QMainWindow):
         self._watcher_timer.start()
 
     def _check_file_for_updates(self):
+        if self._is_saving_to_disk:
+            return
+
         if not self.current_file_path or not os.path.exists(self.current_file_path):
             return
 
         try:
             mtime = os.path.getmtime(self.current_file_path)
-            if mtime > self.last_file_mtime:
+            # Add a small tolerance (0.1s) to avoid sub-second timestamp jitter
+            if mtime > self.last_file_mtime + 0.1:
                 # File updated externally!
                 self.last_file_mtime = mtime # Prevent multiple prompts
                 

@@ -3,6 +3,8 @@ from dataclasses import dataclass
 @dataclass
 class Preferences:
     previous_days_shown: int = 3
+    auto_save: bool = False
+
 
     paste_overwrite_existing: bool = True
 

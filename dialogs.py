@@ -399,6 +399,10 @@ class PreferencesDialog(QDialog):
             self.prev_days_spin.value()
         )
 
+        self.preferences.auto_save = (
+            self.auto_save_checkbox.isChecked()
+        )
+
         if self.copy_linked_radio.isChecked():
             self.preferences.copy_paste_mode = "linked"
         else:
@@ -428,6 +432,14 @@ class PreferencesDialog(QDialog):
         layout.addSpacing(10)
         layout.addWidget(days_label)
         layout.addWidget(self.prev_days_spin)
+
+        layout.addSpacing(20)
+
+        self.auto_save_checkbox = QCheckBox("Auto-save changes to current file")
+        self.auto_save_checkbox.setToolTip("Automatically saves the schedule to disk every time you make a change.")
+        self.auto_save_checkbox.setChecked(self.preferences.auto_save)
+        layout.addWidget(self.auto_save_checkbox)
+
         layout.addStretch()
 
         self._add_page(page)
