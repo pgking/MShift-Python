@@ -2,6 +2,7 @@ import openpyxl
 import calendar
 import re
 from PyQt5.QtWidgets import QFileDialog, QMessageBox
+from models import MonthData
 
 def import_from_excel(main_window):
     """
@@ -85,7 +86,6 @@ def import_from_excel(main_window):
     # Identifying the MonthData object
     if (target_year, target_month) not in main_window.schedule:
         # Create it if it doesn't exist (e.g. importing a future month)
-        from models import MonthData
         main_window.schedule[(target_year, target_month)] = MonthData(target_year, target_month)
     
     month_data = main_window.schedule[(target_year, target_month)]

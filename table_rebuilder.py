@@ -1,6 +1,6 @@
 import calendar
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QTableWidgetItem, QLineEdit
+from PyQt5.QtWidgets import QTableWidgetItem
 from PyQt5.QtGui import QColor, QBrush
 
 

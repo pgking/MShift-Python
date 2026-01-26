@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from enum import Enum
 import calendar
+from abc import ABC, abstractmethod
+from typing import List
 
 class ServiceKind(Enum):
     JOUR = "Jour"
@@ -38,9 +40,6 @@ class DayServiceViolation:
                 f"(expected {self.expected}, got {self.count})"
             )
         
-from abc import ABC, abstractmethod
-from typing import List
-
 class Rule(ABC):
     """Base class for all scheduling rules."""
     @abstractmethod

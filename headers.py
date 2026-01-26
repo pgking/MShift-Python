@@ -1,6 +1,6 @@
 from PyQt5.QtCore import Qt, QRect, QPoint
 from PyQt5.QtWidgets import QHeaderView, QMenu, QToolTip
-from PyQt5.QtGui import QPainter, QPen, QColor, QPolygon, QFont
+from PyQt5.QtGui import QPainter, QPen, QColor, QPolygon
 
 from rules import Severity
 

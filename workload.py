@@ -3,7 +3,7 @@ import calendar
 from dataclasses import dataclass
 from PyQt5.QtGui import QColor
 
-from models import Person, MonthData, Service
+from models import Person
 
 @dataclass
 class MonthlyWorkSummary:

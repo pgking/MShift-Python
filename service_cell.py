@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import QComboBox
 from PyQt5.QtCore import Qt
-from models import Service
+
 
 
 class ServiceCell:

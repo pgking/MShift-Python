@@ -1,3 +1,4 @@
+import os
 from PyQt5.QtWidgets import QMenuBar, QMenu, QAction
 from PyQt5.QtGui import QKeySequence
 
@@ -89,7 +90,6 @@ class MenuBar(QMenuBar):
         prefs_menu.addAction(prefs_action)
 
     def update_recent_menu(self, paths):
-        import os
         self.recent_menu.clear()
         
         if not paths:

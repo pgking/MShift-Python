@@ -3,7 +3,6 @@ import sys
 import json
 import urllib.request
 import zipfile
-import shutil
 import tempfile
 import subprocess
 from PyQt5.QtWidgets import QMessageBox, QProgressDialog

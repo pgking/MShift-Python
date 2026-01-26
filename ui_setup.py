@@ -1,10 +1,12 @@
 import calendar
 from datetime import datetime
-from PyQt5.QtWidgets import QHBoxLayout, QLabel, QComboBox, QPushButton, QHeaderView, QTableWidget
+from PyQt5.QtWidgets import QHBoxLayout, QLabel, QComboBox, QPushButton, QHeaderView
 from PyQt5.QtCore import Qt
 
 from drag_table_widget import DragTableWidget
 from headers import ClickableHorizontalHeader, ColoredVerticalHeader
+from table_rebuilder import TableRebuilder
+from workload import WorkloadCalculator
 
 def setup_main_window_ui(mw):
     """
@@ -15,8 +17,6 @@ def setup_main_window_ui(mw):
     mw.table = DragTableWidget(1, 31)
 
     # 2. Initialize rebuilder and workload that depend on mw.table
-    from table_rebuilder import TableRebuilder
-    from workload import WorkloadCalculator
     mw.table_rebuilder = TableRebuilder(mw)
     mw.workload = WorkloadCalculator(mw)
 

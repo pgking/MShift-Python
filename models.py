@@ -1,7 +1,5 @@
 import uuid
-import json
 import calendar
-from typing import Optional, Dict
 
 class Service:
     def __init__(self, name, short_name, hours, color_hex, id=None, is_visible=True):

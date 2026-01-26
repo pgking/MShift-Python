@@ -3,7 +3,6 @@
 # ============================================================
 
 # stdlib
-import json
 import os
 import sys
 import calendar
@@ -14,16 +13,10 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QWidget,
     QVBoxLayout,
-    QHBoxLayout,
-    QTableWidget,
     QTableWidgetItem,
     QComboBox,
-    QLabel,
-    QDialog,
-    QPushButton,
     QFileDialog,
-    QHeaderView,
-    QMenu
+    QMessageBox
 )
 from PyQt5.QtCore import (
     Qt,
@@ -31,33 +24,26 @@ from PyQt5.QtCore import (
     QTimer
 )
 from PyQt5.QtGui import (
-    QPen,
     QColor,
-    QPainter,
     QBrush
 )
 
 # App modules
-from datetime import datetime
-from models import Person, Service, MonthData
-from drag_table_widget import DragTableWidget
+from models import Person, Service
 from dialogs import AddPersonDialog, AddServiceDialog, ManageServicesDialog, PreferencesDialog
 from menu_bar import MenuBar
-from headers import ColoredVerticalHeader, ClickableHorizontalHeader
 from exporter import export_to_excel
 from importer import import_from_excel
 from file_io import save_schedule, load_schedule
 from service_cell import ServiceCell
-from table_rebuilder import TableRebuilder
-from workload import WorkloadCalculator
 from preferences import Preferences
-from rules import evaluate_day_service_counts
 from controller import ScheduleController
 from app_state import AppState
 from updater import UpdateManager
 from ui_setup import setup_main_window_ui
 from drag_drop_handler import DragDropHandler
 from copy_paste_handler import CopyPasteHandler
+from dev_seed import load_dev_data
 
 VERSION = "1.0.1"
 
@@ -157,7 +143,6 @@ class MainWindow(QMainWindow):
             DEV_MODE = True  # ✅ Change to False for production
             
             if DEV_MODE:
-                from dev_seed import load_dev_data
                 load_dev_data(self)
 
         # =====================================================
@@ -167,7 +152,6 @@ class MainWindow(QMainWindow):
             last_file = self.controller.recent_files[0]
             if os.path.exists(last_file):
                 print(f"Auto-loading last file: {last_file}")
-                from file_io import load_schedule
                 load_schedule(self.controller, last_file)
                 self.current_file_path = last_file
                 self.last_file_mtime = os.path.getmtime(last_file)
@@ -595,7 +579,6 @@ class MainWindow(QMainWindow):
         if self.current_file_path:
             self._is_saving_to_disk = True
             try:
-                from file_io import save_schedule
                 save_schedule(self.controller, self.current_file_path)
                 # Wait a tiny bit for the OS to finalize the write
                 self.last_file_mtime = os.path.getmtime(self.current_file_path)
@@ -629,7 +612,6 @@ class MainWindow(QMainWindow):
             return
         self._is_saving_to_disk = True
         try:
-            from file_io import save_schedule
             save_schedule(self.controller, path)
             self.current_file_path = os.path.abspath(path)
             self.last_file_mtime = os.path.getmtime(path)
@@ -646,7 +628,6 @@ class MainWindow(QMainWindow):
         self.load_recent_file(path)
 
     def load_recent_file(self, path):
-        from file_io import load_schedule
         load_schedule(self.controller, path)
         self.current_file_path = os.path.abspath(path)
         self.last_file_mtime = os.path.getmtime(path)
@@ -671,7 +652,6 @@ class MainWindow(QMainWindow):
                 # File updated externally!
                 self.last_file_mtime = mtime # Prevent multiple prompts
                 
-                from PyQt5.QtWidgets import QMessageBox
                 choice = QMessageBox.question(
                     self,
                     "File Updated",
