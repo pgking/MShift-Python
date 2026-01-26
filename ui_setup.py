@@ -2,6 +2,7 @@ import calendar
 from datetime import datetime
 from PyQt5.QtWidgets import QHBoxLayout, QLabel, QComboBox, QPushButton, QHeaderView
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QTableWidget
 
 from drag_table_widget import DragTableWidget
 from headers import ClickableHorizontalHeader, ColoredVerticalHeader

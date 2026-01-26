@@ -16,7 +16,9 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem,
     QComboBox,
     QFileDialog,
-    QMessageBox
+    QMessageBox,
+    QLabel,
+    QMenu
 )
 from PyQt5.QtCore import (
     Qt,
@@ -29,7 +31,7 @@ from PyQt5.QtGui import (
 )
 
 # App modules
-from models import Person, Service
+from models import Person, Service, MonthData
 from dialogs import AddPersonDialog, AddServiceDialog, ManageServicesDialog, PreferencesDialog
 from menu_bar import MenuBar
 from exporter import export_to_excel
@@ -70,6 +72,11 @@ class MainWindow(QMainWindow):
         self.drag_drop_handler = DragDropHandler(self)
         self.copy_paste_handler = CopyPasteHandler(self)
         self._shift_only_down = False
+        
+        # Row dragging state (used by headers.py)
+        self._row_dragging = False
+        self._row_drag_source = None
+        self._row_drag_target = None
 
         # =====================================================
         # 4. CORE CONTROLLER (holds data and logic)
@@ -743,6 +750,10 @@ class MainWindow(QMainWindow):
         
         person, month_data, day = resolved
         
+        # Remove any cell widget (e.g., combo box) so the item underneath is visible
+        if self.table.cellWidget(row, col):
+            self.table.removeCellWidget(row, col)
+        
         # Block signals to avoid recursive _on_item_changed calls
         self.table.blockSignals(True)
         
@@ -948,6 +959,21 @@ class MainWindow(QMainWindow):
             return True
 
         return day in month_data.holidays
+    
+    def _handle_row_drop(self):
+        """Delegates row drop handling to the drag_drop_handler."""
+        # Copy state from MainWindow to handler
+        self.drag_drop_handler.row_dragging = self._row_dragging
+        self.drag_drop_handler.row_drag_source = self._row_drag_source
+        self.drag_drop_handler.row_drag_target = self._row_drag_target
+        
+        # Execute the drop
+        self.drag_drop_handler.handle_row_drop()
+        
+        # Copy state back from handler to MainWindow
+        self._row_dragging = self.drag_drop_handler.row_dragging
+        self._row_drag_source = self.drag_drop_handler.row_drag_source
+        self._row_drag_target = self.drag_drop_handler.row_drag_target
     
     def is_section_row(self, row: int) -> bool:
         if row < 0 or row >= len(self.rows):
