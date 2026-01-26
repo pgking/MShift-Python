@@ -10,7 +10,7 @@ class MenuBar(QMenuBar):
         self.parent = parent  # MainWindow
 
         self._create_file_menu()
-        self._create_services_menu()
+        self._create_manage_menu()
         self._create_preferences_menu()
         self._create_about_menu()
 
@@ -59,15 +59,28 @@ class MenuBar(QMenuBar):
         file_menu.addSeparator()
         file_menu.addAction(save_exit_action)
 
-    def _create_services_menu(self):
-        services_menu = self.addMenu("Services")
+    def _create_manage_menu(self):
+        manage_menu = self.addMenu("Gérer...")
 
-        manage_services_action = QAction("Manage Services", self)
+        manage_services_action = QAction("Services", self)
         manage_services_action.triggered.connect(
             self.parent.open_services_dialog
         )
 
-        services_menu.addAction(manage_services_action)
+        manage_schemas_action = QAction("Schémas", self)
+        manage_schemas_action.triggered.connect(
+            self.parent.open_schemas_dialog
+        )
+        
+        assign_schema_action = QAction("Assigner un Schéma...", self)
+        assign_schema_action.triggered.connect(
+            self.parent.open_assign_schema_dialog
+        )
+
+        manage_menu.addAction(manage_services_action)
+        manage_menu.addAction(manage_schemas_action)
+        manage_menu.addSeparator()
+        manage_menu.addAction(assign_schema_action)
 
     def _create_about_menu(self):
         about_menu = self.addMenu("About")

@@ -15,13 +15,15 @@ from PyQt5.QtWidgets import (
     QLabel,
     QComboBox,
     QRadioButton,
-    QButtonGroup
+    QButtonGroup,
+    QTableWidget,
+   QTableWidgetItem
 )
 
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QBrush
 from PyQt5.QtCore import Qt
 
-from models import Person, Service
+from models import Person, Service, Schema
 from preferences import Preferences
 
 class AddPersonDialog(QDialog):

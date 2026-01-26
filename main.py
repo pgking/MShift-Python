@@ -18,7 +18,8 @@ from PyQt5.QtWidgets import (
     QFileDialog,
     QMessageBox,
     QLabel,
-    QMenu
+    QMenu,
+    QDialog
 )
 from PyQt5.QtCore import (
     Qt,
@@ -31,8 +32,9 @@ from PyQt5.QtGui import (
 )
 
 # App modules
-from models import Person, Service, MonthData
+from models import Person, Service, MonthData, Schema, SchemaAssignment
 from dialogs import AddPersonDialog, AddServiceDialog, ManageServicesDialog, PreferencesDialog
+from schema_dialogs import CreateSchemaDialog, ManageSchemasDialog, AssignSchemaDialog
 from menu_bar import MenuBar
 from exporter import export_to_excel
 from importer import import_from_excel
@@ -251,6 +253,11 @@ class MainWindow(QMainWindow):
     # 5. TABLE STRUCTURE & PROJECTION
     # =====================================================
     def finalize_table_setup(self):
+        # Auto-apply schemas for this month
+        year = int(self.year_combo.currentText())
+        month = self.month_combo.currentIndex() + 1
+        self.controller.auto_apply_schemas(year, month)
+        
         self.table_rebuilder.finalize()
         
         self.recompute_current_month_violations()
@@ -540,6 +547,17 @@ class MainWindow(QMainWindow):
 
             if self.preferences.auto_save:
                 self.quick_save()
+    
+    def _open_add_schema(self, event):
+        """Open dialog to create a new schema."""
+        print("Add Schema clicked")
+        dialog = CreateSchemaDialog(self.services, self)
+        if dialog.exec():
+            self.controller.schemas.append(dialog.schema)
+            self.app_state.save_app_state(self.controller.to_dict())
+            
+            if self.preferences.auto_save:
+                self.quick_save()
 
     def open_about_dialog(self):
         print("Open about dialog (not implemented yet)")
@@ -581,6 +599,52 @@ class MainWindow(QMainWindow):
         if dialog.exec_() == QDialog.Accepted:
             self.table_rebuilder.rebuild_cells()
             self.refresh_row_headers()
+    
+    def open_schemas_dialog(self):
+        """Open the dialog to manage schemas."""
+        dialog = ManageSchemasDialog(self.controller.schemas, self.services, self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            # Save app state after schema changes
+            self.app_state.save_app_state(self.controller.to_dict())
+    
+    def open_assign_schema_dialog(self):
+        """Open the dialog to assign a schema to people."""
+        dialog = AssignSchemaDialog(self.controller.schemas, self.people, self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            # Get current year and month
+            year = int(self.year_combo.currentText())
+            month = self.month_combo.currentIndex() + 1
+            
+            # Create schema assignments
+            for person in dialog.selected_people:
+                assignment = SchemaAssignment(
+                    person_id=person.id,
+                    schema_id=dialog.selected_schema.id,
+                    repeat_mode=dialog.repeat_mode,
+                    repeat_months=dialog.repeat_months,
+                    start_year=year,
+                    start_month=month
+                )
+                self.controller.schema_assignments.append(assignment)
+                
+                # Apply the schema to current month
+                self.controller.apply_schema_to_month(
+                    dialog.selected_schema,
+                    person.id,
+                    year,
+                    month
+                )
+            
+            # Refresh UI
+            self.finalize_table_setup()
+            
+            # Save changes
+            self.app_state.save_app_state(self.controller.to_dict())
+            
+            if self.preferences.auto_save:
+                self.quick_save()
 
     def quick_save(self):
         if self.current_file_path:

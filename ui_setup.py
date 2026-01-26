@@ -140,24 +140,23 @@ def _setup_action_buttons(mw):
 
     mw.add_person_btn = QLabel("➕ Add Person")
     mw.add_service_btn = QLabel("➕ Add Service")
+    mw.add_schema_btn = QLabel("➕ Add Schema")
 
     # Make them look clickable
-    mw.add_person_btn.setStyleSheet(
-        "padding: 6px; border: 1px solid #888; border-radius: 4px;"
-    )
-    mw.add_service_btn.setStyleSheet(
-        "padding: 6px; border: 1px solid #888; border-radius: 4px;"
-    )
-
-    mw.add_person_btn.setAlignment(Qt.AlignCenter)
-    mw.add_service_btn.setAlignment(Qt.AlignCenter)
+    for btn in [mw.add_person_btn, mw.add_service_btn, mw.add_schema_btn]:
+        btn.setStyleSheet(
+            "padding: 6px; border: 1px solid #888; border-radius: 4px;"
+        )
+        btn.setAlignment(Qt.AlignCenter)
 
     mw.add_person_btn.mousePressEvent = mw._open_add_person
     mw.add_service_btn.mousePressEvent = mw._open_add_service
+    mw.add_schema_btn.mousePressEvent = mw._open_add_schema
 
     buttons_layout.addStretch()
     buttons_layout.addWidget(mw.add_person_btn)
     buttons_layout.addWidget(mw.add_service_btn)
+    buttons_layout.addWidget(mw.add_schema_btn)
     buttons_layout.addStretch()
 
     mw.main_layout.addLayout(buttons_layout)

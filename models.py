@@ -78,6 +78,117 @@ class Person:
             "short_name": self.short_name
         }
 
+class Schema:
+    """
+    Represents a repeating pattern of services.
+    
+    Attributes:
+        id: Unique identifier
+        name: User-defined name for the schema
+        start_weekday: Starting day of the week (0=Monday, 6=Sunday)
+        span_days: Number of days the pattern spans
+        pattern: Dict mapping day_offset (0 to span_days-1) to service_id
+    """
+    def __init__(self, name: str, start_weekday: int, span_days: int, pattern: dict = None, id=None):
+        self.id = id or str(uuid.uuid4())
+        self.name = name.strip()
+        self.start_weekday = start_weekday  # 0=Monday, 6=Sunday
+        self.span_days = span_days
+        self.pattern = pattern or {}  # {day_offset: service_id}
+    
+    def get_service(self, day_offset: int):
+        """Get service_id for a specific day offset in the pattern."""
+        return self.pattern.get(day_offset)
+    
+    def set_service(self, day_offset: int, service_id: str):
+        """Set service_id for a specific day offset in the pattern."""
+        if service_id is None:
+            self.pattern.pop(day_offset, None)
+        else:
+            self.pattern[day_offset] = service_id
+    
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "start_weekday": self.start_weekday,
+            "span_days": self.span_days,
+            "pattern": self.pattern
+        }
+    
+    @staticmethod
+    def from_dict(data):
+        return Schema(
+            name=data["name"],
+            start_weekday=data["start_weekday"],
+            span_days=data["span_days"],
+            pattern=data.get("pattern", {}),
+            id=data.get("id")
+        )
+
+class SchemaAssignment:
+    """
+    Represents the assignment of a schema to a person.
+    
+    Attributes:
+        person_id: ID of the person
+        schema_id: ID of the schema
+        repeat_mode: "always" or "limited"
+        repeat_months: Number of months to repeat (only used if repeat_mode="limited")
+        start_year: Year when assignment was created
+        start_month: Month when assignment was created
+    """
+    def __init__(self, person_id: str, schema_id: str, repeat_mode: str = "always", 
+                 repeat_months: int = 1, start_year: int = None, start_month: int = None):
+        self.person_id = person_id
+        self.schema_id = schema_id
+        self.repeat_mode = repeat_mode  # "always" or "limited"
+        self.repeat_months = repeat_months
+        self.start_year = start_year
+        self.start_month = start_month
+    
+    def should_apply_to_month(self, year: int, month: int) -> bool:
+        """Check if this assignment should apply to the given month."""
+        if self.repeat_mode == "always":
+            # Only apply to current and future months
+            if self.start_year is None or self.start_month is None:
+                return True
+            
+            current_period = year * 12 + month
+            start_period = self.start_year * 12 + self.start_month
+            return current_period >= start_period
+        
+        else:  # limited
+            if self.start_year is None or self.start_month is None:
+                return False
+            
+            current_period = year * 12 + month
+            start_period = self.start_year * 12 + self.start_month
+            end_period = start_period + self.repeat_months - 1
+            
+            return start_period <= current_period <= end_period
+    
+    def to_dict(self):
+        return {
+            "person_id": self.person_id,
+            "schema_id": self.schema_id,
+            "repeat_mode": self.repeat_mode,
+            "repeat_months": self.repeat_months,
+            "start_year": self.start_year,
+            "start_month": self.start_month
+        }
+    
+    @staticmethod
+    def from_dict(data):
+        return SchemaAssignment(
+            person_id=data["person_id"],
+            schema_id=data["schema_id"],
+            repeat_mode=data.get("repeat_mode", "always"),
+            repeat_months=data.get("repeat_months", 1),
+            start_year=data.get("start_year"),
+            start_month=data.get("start_month")
+        )
+
 class MonthData:
     def __init__(self, year : int, month : int):
         self.year = year
