@@ -71,8 +71,8 @@ class DragTableWidget(QTableWidget):
         # Copy rectangle
         # ----------------------
         mw = getattr(self, "main_window", None)
-        if mw and mw._should_show_copy_rect():
-            mw._paint_copy_rectangle(painter)
+        if mw and hasattr(mw, "copy_paste_handler") and mw.copy_paste_handler.should_show_copy_rect():
+            mw.copy_paste_handler.paint_copy_rectangle(painter)
 
         painter.end()
 

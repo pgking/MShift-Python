@@ -188,7 +188,7 @@ class ClickableHorizontalHeader(QHeaderView):
                 painter.setFont(font)
                 painter.drawText(
                     x,
-                    y + icon_size,
+                    y,
                     icon_size,
                     icon_size,
                     Qt.AlignCenter,

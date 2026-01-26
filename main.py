@@ -52,8 +52,12 @@ from table_rebuilder import TableRebuilder
 from workload import WorkloadCalculator
 from preferences import Preferences
 from rules import evaluate_day_service_counts
+from controller import ScheduleController
 from app_state import AppState
 from updater import UpdateManager
+from ui_setup import setup_main_window_ui
+from drag_drop_handler import DragDropHandler
+from copy_paste_handler import CopyPasteHandler
 
 VERSION = "1.0.1"
 
@@ -75,28 +79,19 @@ class MainWindow(QMainWindow):
         self.resize(1100, 600)
 
         # =====================================================
-        # 2. INPUT / INTERACTION STATE (ephemeral, never saved)
+        # 2. INPUT / INTERACTION HANDLERS
         # =====================================================
-        # Dragging cells
-        self._mouse_pressed_index = None
-        self._mouse_press_pos = None
-        self._dragging = False
-        self._drag_rect = None
-        self._drag_source = None
-
-        # Dragging person rows
-        self._row_dragging = False
-        self._row_drag_source = None
-        self._row_drag_target = None
-
-        # Copy / Paste
-        self._clipboard_service_id = None
-        self._clipboard_cell = None
+        self.drag_drop_handler = DragDropHandler(self)
+        self.copy_paste_handler = CopyPasteHandler(self)
         self._shift_only_down = False
 
         # =====================================================
-        # 3. STATIC DOMAIN (never user-editable)
+        # 4. CORE CONTROLLER (holds data and logic)
         # =====================================================
+        self.controller = ScheduleController()
+        
+        # Keep some UI-specific shortcuts for convenience if needed, 
+        # but try to migrate to controller.
         self.sections = [
             {"id": "PMSI", "label": "PMSI"},
             {"id": "Suites", "label": "Suites de couches"},
@@ -108,19 +103,7 @@ class MainWindow(QMainWindow):
             {"id": "Vac&Cong", "label": "Vacataires et congés"}
         ]
 
-        # =====================================================
-        # 4. CORE STATE CONTAINERS (will be filled by AppState)
-        # =====================================================
-        self.schedule = {}          # key : (year, month) -> MonthData
         self.current_month = None
-        self.rows = []              # Ordered list of rows (sections + people)
-        self.people = []
-        self.services = []
-        self.preferences = None
-        self.n_prev_days = 0
-
-        self.day_service_violations = []
-        self.recent_files = []
         
         self.current_file_path = None
         self.last_file_mtime = 0
@@ -133,17 +116,12 @@ class MainWindow(QMainWindow):
         # =====================================================
         self.app_state = AppState()
 
-        # =====================================================
-        # 6. CENTRAL WIDGET & LAYOUT (still no data)
-        # =====================================================
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
 
-        self._setup_save_load_buttons()
-        self._setup_action_buttons()
-        self._setup_controls()
-        self._setup_table()
+        self._is_saving_to_disk = False
+        setup_main_window_ui(self)
 
         # =====================================================
         # 6b. UPDATER
@@ -152,31 +130,25 @@ class MainWindow(QMainWindow):
         # Check for updates silently after 2 seconds to not block startup
         QTimer.singleShot(2000, lambda: self.updater.start_check(silent=True))
 
-        # 7. HELPERS THAT DEPEND ON TABLE EXISTING
-        # =====================================================
-        self.table_rebuilder = TableRebuilder(self)
-        self.workload = WorkloadCalculator(self)
-        self._is_saving_to_disk = False
-
         # =====================================================
         # 8. LOAD APP STATE OR FALL BACK TO DEFAULTS
         # =====================================================
         loaded = self.load_app_state()
         if not loaded :
             # ---- First launch defaults ----
-            self.preferences = Preferences()
-            self.n_prev_days = self.preferences.previous_days_shown
+            self.controller.preferences = Preferences()
+            self.controller.n_prev_days = self.controller.preferences.previous_days_shown
 
-            self.services = [
+            self.controller.services = [
                 Service("Jour", "J", 12, "#A3D5FF"),
                 Service("Nuit", "N", 12, "#FFD6A3"),
                 Service("Planning Familial", "GP", 8, "#C3B1E1"),
                 Service("Inconnu", "?", 0, "#FF5555", id="unknown", is_visible=False)
             ]
 
-            self.people = []
+            self.controller.people = []
 
-            self.rows = []
+            self.controller.rows = []
             self._populate_initial_rows()
 
             # =====================================================
@@ -191,60 +163,77 @@ class MainWindow(QMainWindow):
         # =====================================================
         # 8b. AUTO-LOAD LAST FILE
         # =====================================================
-        if self.recent_files:
-            last_file = self.recent_files[0]
+        if self.controller.recent_files:
+            last_file = self.controller.recent_files[0]
             if os.path.exists(last_file):
                 print(f"Auto-loading last file: {last_file}")
-                self.load_recent_file(last_file)
+                from file_io import load_schedule
+                load_schedule(self.controller, last_file)
+                self.current_file_path = last_file
+                self.last_file_mtime = os.path.getmtime(last_file)
 
-        # =====================================================
-        # 9. EVENT FILTERS & FINAL UI BUILD
-        # =====================================================
         self.installEventFilter(self)
         self.finalize_table_setup()
         
         # Initial refresh of menu
         self.menu_bar.update_recent_menu(self.recent_files)
 
+    # Proxy properties for legacy code compatibility
+    @property
+    def people(self): return self.controller.people
+    @people.setter
+    def people(self, v): self.controller.people = v
+
+    @property
+    def services(self): return self.controller.services
+    @services.setter
+    def services(self, v): self.controller.services = v
+
+    @property
+    def schedule(self): return self.controller.schedule
+    @schedule.setter
+    def schedule(self, v): self.controller.schedule = v
+
+    @property
+    def rows(self): return self.controller.rows
+    @rows.setter
+    def rows(self, v): self.controller.rows = v
+
+    @property
+    def preferences(self): return self.controller.preferences
+    @preferences.setter
+    def preferences(self, v): self.controller.preferences = v
+
+    @property
+    def n_prev_days(self): return self.controller.n_prev_days
+    @n_prev_days.setter
+    def n_prev_days(self, v): self.controller.n_prev_days = v
+
+    @property
+    def day_service_violations(self): return self.controller.day_service_violations
+    @day_service_violations.setter
+    def day_service_violations(self, v): self.controller.day_service_violations = v
+
+    @property
+    def recent_files(self): return self.controller.recent_files
+    @recent_files.setter
+    def recent_files(self, v): self.controller.recent_files = v
+
     # =====================================================
     # 4. APP LIFECYCLE & PERSISTENCE
     # =====================================================
     def load_app_state(self):
-        path = self.app_state.get_app_state_path()
-        if not os.path.exists(path):
+        data = self.app_state.load_app_state()
+        if not data:
             return False
 
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        self.controller.from_dict(data)
 
-        # Preferences
-        self.preferences = Preferences.from_dict(
-            data.get("preferences", {})
-        )
-        self.n_prev_days = self.preferences.previous_days_shown
-
-        # People
-        self.people = [
-            Person(**p) for p in data.get("people", [])
-        ]
-
-        # Services
-        self.services = [
-            Service(**s) for s in data.get("services", [])
-        ]
-
-        # Rows
-        self.rows = data.get("rows", [])
-        
         # Restore last viewed month
-        if "last_year" in data and "last_month" in data:
-            self.year_combo.setCurrentText(str(data["last_year"]))
-            self.month_combo.setCurrentIndex(data["last_month"] - 1)
+        if self.controller.last_year and self.controller.last_month:
+            self.year_combo.setCurrentText(str(self.controller.last_year))
+            self.month_combo.setCurrentIndex(self.controller.last_month - 1)
 
-        # Recent Files
-        self.recent_files = data.get("recent_files", [])
-        # Cleanup invalid files might be good but let's keep it simple first
-        
         return True
     
     def open_preferences(self):
@@ -257,10 +246,14 @@ class MainWindow(QMainWindow):
             self.finalize_table_setup()
 
             # Persist app state
-            self.app_state.save_app_state(self)
+            self.controller.last_year = int(self.year_combo.currentText())
+            self.controller.last_month = self.month_combo.currentIndex() + 1
+            self.app_state.save_app_state(self.controller.to_dict())
 
     def closeEvent(self, event):
-        self.app_state.save_app_state(self)
+        self.controller.last_year = int(self.year_combo.currentText())
+        self.controller.last_month = self.month_combo.currentIndex() + 1
+        self.app_state.save_app_state(self.controller.to_dict())
         super().closeEvent(event)
 
     # =====================================================
@@ -333,11 +326,7 @@ class MainWindow(QMainWindow):
         if month is None:
             month = self.month_combo.currentIndex() + 1
 
-        month_data = self.schedule[(year, month)]
-        month_data.set_service(person_id, day, service_id)
-
-        # Recompute violations
-        self._recompute_day_service_violations()
+        self.controller.apply_assignment_change(person_id, day, service_id, year, month)
         
         # Minimal UI refresh
         self.table.horizontalHeader().viewport().update()
@@ -369,8 +358,7 @@ class MainWindow(QMainWindow):
         year = int(self.year_combo.currentText())
         month = self.month_combo.currentIndex() + 1
         
-        month_data = self.schedule[(year, month)]
-        month_data.set_comment(person_id, text)
+        self.controller.apply_comment_change(person_id, text, year, month)
 
         # UI: Refresh Notes cell
         row_idx = next((i for i, r in enumerate(self.rows) if r.get("person_id") == person_id), None)
@@ -384,461 +372,40 @@ class MainWindow(QMainWindow):
     def _recompute_day_service_violations(self):
         year = int(self.year_combo.currentText())
         month = self.month_combo.currentIndex() + 1
-
-        month_data = self.schedule.get((year, month))
-        if month_data is None:
-            self.day_service_violations = []
-            return
-
-        self.day_service_violations = evaluate_day_service_counts(
-            month_data=month_data,
-            people=self.people,
-            services_by_id={s.id: s for s in self.services},
-            year=year,
-            month=month
-        )
+        self.controller.recompute_violations(year, month)
 
     def recompute_current_month_violations(self):
         self._recompute_day_service_violations()
 
-    # =====================================================
-    # 7. COPY / PASTE
-    # =====================================================
-    def _clipboard_is_still_valid(self) -> bool:
-        """
-        Returns True if the copied cell still contains
-        the same service as when it was copied.
-        """
-        if self._clipboard_cell is None:
-            return False
-
-        if self._clipboard_service_id is None:
-            return False
-
-        row, col = self._clipboard_cell
-
-        resolved = self._resolve_person_cell(row, col)
-        if not resolved:
-            return False
-
-        person, month_data, day = resolved
-        current_service_id = month_data.get_service(person.id, day)
-
-        return current_service_id == self._clipboard_service_id
-    
-    def _should_show_copy_rect(self):
-        return (
-            self._shift_only_down and
-            self._clipboard_is_still_valid()
-        )
-    
-    def _paint_copy_rectangle(self, painter):
-        if self._clipboard_cell is None:
-            return
-
-        row, col = self._clipboard_cell
-
-        rect = self.table.visualRect(
-            self.table.model().index(row, col)
-        )
-        if not rect.isValid():
-            return
-        
-        rect = rect.adjusted(-1, -1, 1, 1)  # Slightly bigger than cell
-
-        pen = QPen(Qt.black)
-        pen.setStyle(Qt.DotLine)
-        pen.setWidth(2)
-
-        painter.setClipping(False)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRect(rect)
-
-    def _handle_copy_paste_events(self, obj, event) -> bool:
-        # Only handle viewports interactions
-        if obj is not self.table.viewport():
-            return False
-        
-        modifiers = QApplication.keyboardModifiers()
-        if not (modifiers & Qt.ShiftModifier):
-            return False
-        
-        # --------------------------------
-        # SHIFT + RIGHT CLICK → COPY
-        # --------------------------------
-        if event.type() == QEvent.MouseButtonPress and event.button() == Qt.RightButton:
-            index = self.table.indexAt(event.pos())
-            if not index.isValid():
-                return True
-            
-            resolved = self._resolve_person_cell(index.row(), index.column())
-            if not resolved:
-                return True
-            
-            person, month_data, day = resolved
-            service_id = month_data.get_service(person.id, day)
-            if service_id is None:
-                return True
-            
-            self._clipboard_service_id = service_id
-            self._clipboard_cell = (index.row(), index.column())
-
-            self.table.viewport().update()
-            return True
-        
-        # --------------------------------
-        # SHIFT + LEFT CLICK → PASTE
-        # --------------------------------
-        if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
-            # Paste permission based on preference
-            if self.preferences.copy_paste_mode == "linked":
-                if not self._clipboard_is_still_valid():
-                    return True
-                
-            else : # Persistent
-                if self._clipboard_service_id is None:
-                    return True
-                
-            index = self.table.indexAt(event.pos())
-            if not index.isValid():
-                return True
-            
-            resolved = self._resolve_person_cell(index.row(), index.column())
-            if not resolved:
-                return True
-            
-            person, month_data, day = resolved
-            existing = month_data.get_service(person.id, day)
-
-            if existing is not None and not self.preferences.paste_overwrite_existing:
-                return True
-            
-            # Backend update
-            self.apply_assignment_change(
-                person_id=person.id,
-                day=day,
-                service_id=self._clipboard_service_id,
-                reason="paste"
-            )
-
-            # UI Reprojection
-            self.table.removeCellWidget(index.row(), index.column())
-
-            combo = self._create_service_combo(
-                index.row(),
-                index.column(),
-                preset_service=self._clipboard_service_id
-            )
-
-            self.table.setCellWidget(index.row(), index.column(), combo)
-
-            self.refresh_row_headers()
-            return True
-        
-        return False
-
-    # =====================================================
-    # 8. DRAG & DROP
-    # =====================================================
-    def _start_drag(self, index):
-        row = index.row()
-        col = index.column()
-
-        resolved = self._resolve_person_cell(row, col)
-        if not resolved:
-            print("Drag aborted : invalid cell")
-            return True
-        
-        person, month_data, day = resolved
-        service_id = month_data.get_service(person.id, day)
-
-        if service_id is None :
-            print("Drag aborted : empty cell")
-            return
-        
-        self._drag_source = (person.id, col, service_id)
-
-    def _replace_service(self, src_person, src_day, src_month_data,
-                     tgt_person, tgt_day, tgt_month_data):
-        
-        src_service_id = src_month_data.get_service(src_person.id, src_day)
-        if src_service_id is None:
-            return
-        
-        # Clear source
-        self.apply_assignment_change(
-            person_id=src_person.id,
-            day=src_day,
-            service_id=None,
-            reason="drag_replace_source"
-        )
-
-        # Apply target
-        self.apply_assignment_change(
-            person_id=tgt_person.id,
-            day=tgt_day,
-            service_id=src_service_id,
-            reason="drag_replace_target"
-        )
-
-    def _swap_services(self, src_person, src_day, src_month_data,
-                   tgt_person, tgt_day, tgt_month_data):
-        
-        src_service_id = src_month_data.get_service(src_person.id, src_day)
-        tgt_service_id = tgt_month_data.get_service(tgt_person.id, tgt_day)
-
-        if src_service_id is None and tgt_service_id is None:
-            return
-        
-        self.apply_assignment_change(
-            person_id=src_person.id,
-            day=src_day,
-            service_id=tgt_service_id,
-            reason="drag_swap_source"
-        )
-
-        self.apply_assignment_change(
-            person_id=tgt_person.id,
-            day=tgt_day,
-            service_id=src_service_id,
-            reason="drag_swap_target"
-        )
-
-    def _handle_drop(self, source_index, pos):
-        if not hasattr(self, "_drag_source") or self._drag_source is None:
-            return
-        
-        target = self.table.indexAt(pos)
-        if not target.isValid():
-            return
-        
-        # Block if in previous month
-        if not self._is_column_in_current_month(target.column()):
-            self._abort_drag_with_feedback()
-            return
-        
-        tgt_row = target.row()
-        tgt_col = target.column()
-
-        resolved_target = self._resolve_person_cell(tgt_row, tgt_col)
-        if not resolved_target:
-            return True
-        
-        tgt_person, tgt_month_data, tgt_day = resolved_target
-
-        src_person_id, src_col, service_id = self._drag_source
-        src_row = next(
-            i for i, r in enumerate(self.rows)
-            if r.get("person_id") == src_person_id
-        )
-
-        resolved_source = self._resolve_person_cell(src_row, src_col)
-        if not resolved_source:
-            return
-
-        src_person, src_month_data, src_day = resolved_source
-
-        target_service_id = tgt_month_data.get_service(
-            tgt_person.id,
-            tgt_day
-        )
-
-        mode = self.preferences.drag_drop_mode
-        if target_service_id is None:
-            # Empty target → always replace
-            self._replace_service(
-                src_person, src_day, src_month_data,
-                tgt_person, tgt_day, tgt_month_data
-            )
-
-        elif mode == "swap":
-            self._swap_services(
-                src_person, src_day, src_month_data,
-                tgt_person, tgt_day, tgt_month_data
-            )
-
-        elif mode == "replace":
-            self._replace_service(
-                src_person, src_day, src_month_data,
-                tgt_person, tgt_day, tgt_month_data
-            )
-
-        elif mode == "ask":
-            choice = self._ask_drag_drop_action(pos)
-            if choice is None:
-                return  # Cancelled
-            
-            if choice == "swap":
-                self._swap_services(
-                    src_person, src_day, src_month_data,
-                    tgt_person, tgt_day, tgt_month_data
-                )
-
-            elif choice == "replace":
-                self._replace_service(
-                    src_person, src_day, src_month_data,
-                    tgt_person, tgt_day, tgt_month_data
-                )
-
-
-        # UI update
-        self.refresh_cell(src_row, src_col)
-        self.refresh_cell(tgt_row, tgt_col)
-
-        del self._drag_source
-        self.refresh_row_headers()
-
-    def _handle_row_drop(self):
-        if not self._row_dragging:
-            return
-        
-        source = self._row_drag_source
-        target = self._row_drag_target
-
-        if source is None or target is None or target == source:
-            self._reset_row_drag()
-            return
-        
-        # Remove old widgets from the source row
-        for col in range(self.table.columnCount()):
-            self.table.removeCellWidget(source, col)
-
-        # Get person rows only
-        person_row = self.rows.pop(source)
-
-        insert_index = target
-        if target > source:
-            insert_index -= 1
-
-        self.rows.insert(insert_index, person_row)
-
-        # Reset dragging flags
-        self._reset_row_drag()
-
-        # Clear vertical header colors
-        self.table.verticalHeader()._row_colors.clear()
-
-        self.finalize_table_setup()
-        self.app_state.save_app_state(self)
-
-        if self.preferences.auto_save:
-            self.quick_save()
-
-
-
-    def _reset_row_drag(self):
-        self._row_dragging = False
-        self._row_drag_source = None
-        self._row_drag_target = None
-
-    def _handle_drag_events(self, obj, event) -> bool:
-        # Only viewport events
-        if obj is not self.table.viewport():
-            return False
-        
-        # -----------------
-        # LEFT BUTTON PRESS
-        # -----------------
-        if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-            index = self.table.indexAt(event.pos())
-            if not index.isValid():
-                return False
-            
-            self._mouse_pressed_index = index
-            self._mouse_press_pos = event.pos()
-            self._dragging = False
-            return False # Allow propagation
-        
-        # -----------------
-        # MOUSE MOVE (DRAG DETECTION)
-        # -----------------
-        if event.type() == QEvent.MouseMove and self._mouse_pressed_index is not None:
-            if self._mouse_press_pos is None:
-                return False
-            
-            distance = (event.pos() - self._mouse_press_pos).manhattanLength()
-            if distance > QApplication.startDragDistance():
-                if not self._dragging:
-                    self._dragging = True
-                    self._start_drag(self._mouse_pressed_index)
-
-                if self._drag_source is not None:
-                    target_index = self.table.indexAt(event.pos())
-                    if target_index.isValid():
-                        self.table.set_drag_rect(self.table.visualRect(target_index))
-
-                return True
-
-            return False
-        
-        # -----------------
-        # LEFT BUTTON RELEASE
-        # -----------------
-        if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
-            if self._mouse_pressed_index is None:
-                return False
-            
-            if self._dragging:  # If you were dragging
-                self._handle_drop(self._mouse_pressed_index, event.pos())
-            else:               # If you just clicked
-                row = self._mouse_pressed_index.row()
-                col = self._mouse_pressed_index.column()
-                self._open_cell_dropdown(row, col)
-
-            # Reset Drag State
-            self._mouse_pressed_index = None
-            self._mouse_press_pos = None
-            self._dragging = False
-            self._drag_source = None
-
-            self.table.set_drag_rect(None)
-            self.table.viewport().update()
-
-            return True
-        
-        return False
-
-
-    # =====================================================
-    # 9. QT EVENTS
-    # =====================================================
     def eventFilter(self, obj, event):
         if self._handle_modifier_keys(event):
             return True
         
-        if self._handle_copy_paste_events(obj, event):
+        if self.copy_paste_handler.handle_events(obj, event):
             return True
         
-        if self._handle_drag_events(obj, event):
+        if self.drag_drop_handler.handle_events(obj, event):
             return True
         
         if self._handle_delete_event(obj, event):
             return True
             
         if obj is self.table.viewport():
-            # -----------------
-            # MOUSEWHELL WITH SHIFT FOR HORIZONTAL SCROLL
-            # -----------------
-            if obj is self.table.viewport():
-                if event.type() == event.Type.Wheel:
-                    modifiers = QApplication.keyboardModifiers()
-                    if modifiers & Qt.ShiftModifier:
-                        delta = event.angleDelta().y()  # vertical wheel movement
-                        # Scroll horizontally: Down (negative delta) -> Right (value increase)
-                        # We divide by 2 to get a smooth speed (approx 1 column per tick)
-                        bar = self.table.horizontalScrollBar()
-                        bar.setValue(bar.value() - (delta // 12))
-                        return True  # consume event
+            if event.type() == QEvent.Wheel:
+                modifiers = QApplication.keyboardModifiers()
+                if modifiers & Qt.ShiftModifier:
+                    delta = event.angleDelta().y()
+                    bar = self.table.horizontalScrollBar()
+                    bar.setValue(bar.value() - (delta // 12))
+                    return True
                     
         return super().eventFilter(obj, event)
-    
+
     def _handle_modifier_keys(self, event) -> bool:
         if event.type() not in (QEvent.KeyPress, QEvent.KeyRelease):
             return False
         
         modifiers = event.modifiers()
-
         new_shift_only = (
             (modifiers & Qt.ShiftModifier)
             and not (modifiers & Qt.ControlModifier)
@@ -892,144 +459,8 @@ class MainWindow(QMainWindow):
 
     
     # =====================================================
-    # 10. UI Setup
+    # 10. UI HELPERS
     # =====================================================
-    def _setup_save_load_buttons(self):
-        save_load_layout = QHBoxLayout()
-
-        self.save_btn = QLabel("💾 Save")
-        self.load_btn = QLabel("📂 Load")
-
-        for btn in [self.save_btn, self.load_btn]:
-            btn.setStyleSheet("padding: 6px; border: 1px solid #888; border-radius: 4px;")
-            btn.setAlignment(Qt.AlignCenter)
-
-        self.save_btn.mousePressEvent = lambda e: self.save_file()
-        self.load_btn.mousePressEvent = lambda e: self.load_file()
-
-        save_load_layout.addStretch()
-        save_load_layout.addWidget(self.save_btn)
-        save_load_layout.addWidget(self.load_btn)
-        save_load_layout.addStretch()
-
-        self.main_layout.addLayout(save_load_layout)
-        
-
-    def _setup_controls(self):
-        controls_layout = QHBoxLayout()
-
-        real_life_month = datetime.now().month
-        real_life_year = datetime.now().year
-
-        self.month_combo = QComboBox()
-        self.month_combo.addItems(calendar.month_name[1:])
-        self.month_combo.setCurrentIndex(real_life_month - 1)
-        self.month_combo.currentIndexChanged.connect(self.finalize_table_setup)
-
-        # Previous month button
-        prev_btn = QPushButton("◀")
-        prev_btn.setFixedWidth(32)
-        prev_btn.clicked.connect(self._go_to_previous_month)
-
-        # Next month button
-        next_btn = QPushButton("▶")
-        next_btn.setFixedWidth(32)
-        next_btn.clicked.connect(self._go_to_next_month)
-
-        self.year_combo = QComboBox()
-        self.year_combo.addItems([str(y) for y in range(2025, 2031)])
-        self.year_combo.setCurrentText(f"{real_life_year}")
-        self.year_combo.currentIndexChanged.connect(self.finalize_table_setup)
-
-        controls_layout.addStretch()
-        controls_layout.addWidget(QLabel("Month:"))
-        controls_layout.addWidget(self.month_combo)
-        controls_layout.addWidget(prev_btn)
-        controls_layout.addWidget(next_btn)
-        controls_layout.addWidget(QLabel("Year:"))
-        controls_layout.addWidget(self.year_combo)
-        controls_layout.addStretch()
-
-        self.main_layout.addLayout(controls_layout)
-
-
-    def _setup_table(self):
-        self.table = DragTableWidget(1, 31)
-        self.table.main_window = self
-        self.table.setShowGrid(True)
-        self.table.setStyleSheet("""
-            QTableWidget {
-                gridline-color: #B0B0B0;
-            }
-        """)
-
-        # Disable cell selection highlight
-        self.table.setSelectionMode(QTableWidget.NoSelection)
-
-        self.table.viewport().installEventFilter(self)
-        self.table.horizontalHeader().installEventFilter(self)
-
-        # Keep headers interactive
-        self.table.horizontalHeader().setSectionsClickable(True)
-        self.table.verticalHeader().setSectionsClickable(True)
-
-        header = ClickableHorizontalHeader(self, self.table)
-        self.table.setHorizontalHeader(header)
-        header.setSectionsClickable(True)
-
-        # Handle note edits (last column)
-        self.table.itemChanged.connect(self._on_item_changed)
-
-
-        self.table.horizontalHeader().setStyleSheet("""
-            QHeaderView::section {
-                border-bottom: 5px solid #888;  /* line thickness and color */
-                padding: 4px;                   /* optional, for spacing */
-                background-color : #f0f0f0;
-            }
-        """)
-
-        # Optional: make sure the header uses full height for the border
-        self.table.horizontalHeader().setHighlightSections(False)
-        self.table.horizontalHeader().setStretchLastSection(True)
-
-        header = ColoredVerticalHeader(main_window=self, parent=self.table)
-        self.table.setVerticalHeader(header)
-        header.setMinimumWidth(80)
-        header.setStyleSheet("QHeaderView::section { background: transparent; }")
-
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)
-        self.table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
-
-        self.main_layout.addWidget(self.table)
-
-    def _setup_action_buttons(self):
-        buttons_layout = QHBoxLayout()
-
-        self.add_person_btn = QLabel("➕ Add Person")
-        self.add_service_btn = QLabel("➕ Add Service")
-
-        # Make them look clickable
-        self.add_person_btn.setStyleSheet(
-            "padding: 6px; border: 1px solid #888; border-radius: 4px;"
-        )
-        self.add_service_btn.setStyleSheet(
-            "padding: 6px; border: 1px solid #888; border-radius: 4px;"
-        )
-
-        self.add_person_btn.setAlignment(Qt.AlignCenter)
-        self.add_service_btn.setAlignment(Qt.AlignCenter)
-
-        self.add_person_btn.mousePressEvent = self._open_add_person
-        self.add_service_btn.mousePressEvent = self._open_add_service
-
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(self.add_person_btn)
-        buttons_layout.addWidget(self.add_service_btn)
-        buttons_layout.addStretch()
-
-        self.main_layout.addLayout(buttons_layout)
-
     def _create_service_combo(self, row, column, preset_service = None):
         # Only allow combo for person rows
         row_data = self.rows[row]
@@ -1061,13 +492,16 @@ class MainWindow(QMainWindow):
             combo._service_cell.preset_service(service)
 
         return combo
-    
-    def _ensure_combo(self, row, column) :
+
+    def _ensure_combo(self, row, column):
+        """If cell is empty, create combo. If already a combo, ignore."""
         combo = self.table.cellWidget(row, column)
-        if combo is None :
-            combo = self._create_service_combo(row, column)
-            if combo :
-                self.table.setCellWidget(row, column, combo)
+        if combo:
+            return combo
+
+        combo = self._create_service_combo(row, column)
+        if combo:
+            self.table.setCellWidget(row, column, combo)
 
         return combo
     
@@ -1161,7 +595,8 @@ class MainWindow(QMainWindow):
         if self.current_file_path:
             self._is_saving_to_disk = True
             try:
-                save_schedule(self, self.current_file_path)
+                from file_io import save_schedule
+                save_schedule(self.controller, self.current_file_path)
                 # Wait a tiny bit for the OS to finalize the write
                 self.last_file_mtime = os.path.getmtime(self.current_file_path)
             finally:
@@ -1194,7 +629,8 @@ class MainWindow(QMainWindow):
             return
         self._is_saving_to_disk = True
         try:
-            save_schedule(self, path)
+            from file_io import save_schedule
+            save_schedule(self.controller, path)
             self.current_file_path = os.path.abspath(path)
             self.last_file_mtime = os.path.getmtime(path)
         finally:
@@ -1210,7 +646,8 @@ class MainWindow(QMainWindow):
         self.load_recent_file(path)
 
     def load_recent_file(self, path):
-        load_schedule(self, path)
+        from file_io import load_schedule
+        load_schedule(self.controller, path)
         self.current_file_path = os.path.abspath(path)
         self.last_file_mtime = os.path.getmtime(path)
         self._add_to_recent_files(path)
@@ -1265,7 +702,7 @@ class MainWindow(QMainWindow):
         self.menu_bar.update_recent_menu(self.recent_files)
         
         # Persist
-        self.app_state.save_app_state(self)
+        self.app_state.save_app_state(self.controller.to_dict())
 
     # =====================================================
     # 13. DOMAIN RESOLUTION HELPERS
