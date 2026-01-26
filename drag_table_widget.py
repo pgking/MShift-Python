@@ -40,14 +40,21 @@ class DragTableWidget(QTableWidget):
             )
 
         # ----------------------
-        # Column shading
+        # Column shading (Weekends)
         # ----------------------
         color = QColor(200, 200, 200, 120)
         for col in range(self.columnCount()):
             if self._is_shaded_column(col):
                 for row in range(self.rowCount()):
+                    # Skip shading overlay if the cell has a service (text)
+                    # or if it's a section specialized row (handled above)
+                    item = self.item(row, col)
+                    if (item and item.text()) or self.main_window.is_section_row(row):
+                        continue
+
                     rect = self.visualRect(self.model().index(row, col))
-                    painter.fillRect(rect, color)
+                    if rect.isValid():
+                        painter.fillRect(rect, color)
 
         # ----------------------
         # Drag rectangle

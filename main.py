@@ -33,7 +33,8 @@ from PyQt5.QtCore import (
 from PyQt5.QtGui import (
     QPen,
     QColor,
-    QPainter
+    QPainter,
+    QBrush
 )
 
 # App modules
@@ -52,6 +53,9 @@ from workload import WorkloadCalculator
 from preferences import Preferences
 from rules import evaluate_day_service_counts
 from app_state import AppState
+from updater import UpdateManager
+
+VERSION = "1.0.1"
 
 # ============================================================
 # 2. Main Window
@@ -140,6 +144,13 @@ class MainWindow(QMainWindow):
         self._setup_action_buttons()
         self._setup_controls()
         self._setup_table()
+
+        # =====================================================
+        # 6b. UPDATER
+        # =====================================================
+        self.updater = UpdateManager(VERSION, self)
+        # Check for updates silently after 2 seconds to not block startup
+        QTimer.singleShot(2000, lambda: self.updater.start_check(silent=True))
 
         # 7. HELPERS THAT DEPEND ON TABLE EXISTING
         # =====================================================
@@ -334,6 +345,18 @@ class MainWindow(QMainWindow):
         # Update worked hours in row headers
         self.refresh_row_headers()
 
+        # UI: Refresh specific cell item
+        # Find row for this person
+        row_idx = next((i for i, r in enumerate(self.rows) if r.get("person_id") == person_id), None)
+        if row_idx is not None:
+            # Find column for this day
+            # If it's the requested year/month
+            cur_year = int(self.year_combo.currentText())
+            cur_month = self.month_combo.currentIndex() + 1
+            if year == cur_year and month == cur_month:
+                col_idx = day + self.n_prev_days - 1
+                self.refresh_cell(row_idx, col_idx)
+
         # Auto-save if enabled
         if self.preferences and self.preferences.auto_save:
             self.quick_save()
@@ -348,6 +371,12 @@ class MainWindow(QMainWindow):
         
         month_data = self.schedule[(year, month)]
         month_data.set_comment(person_id, text)
+
+        # UI: Refresh Notes cell
+        row_idx = next((i for i, r in enumerate(self.rows) if r.get("person_id") == person_id), None)
+        if row_idx is not None:
+            notes_col = self.table.columnCount() - 1
+            self.refresh_cell(row_idx, notes_col)
 
         if self.preferences.auto_save:
             self.quick_save()
@@ -654,30 +683,8 @@ class MainWindow(QMainWindow):
 
 
         # UI update
-        # Clear both cells
-        src_row = next(i for i, r in enumerate(self.rows) if r.get("person_id") == src_person_id)
-        self.table.removeCellWidget(src_row, src_col)
-        self.table.removeCellWidget(tgt_row, tgt_col)
-
-        # Source cell
-        src_service_now = src_month_data.get_service(src_person.id, src_day)
-        if src_service_now is not None:
-            src_combo = self._create_service_combo(
-                src_row,
-                src_col,
-                preset_service=src_service_now
-            )
-            self.table.setCellWidget(src_row, src_col, src_combo)
-
-        # Target cell
-        tgt_service_now = tgt_month_data.get_service(tgt_person.id, tgt_day)
-        if tgt_service_now is not None:
-            tgt_combo = self._create_service_combo(
-                tgt_row,
-                tgt_col,
-                preset_service=tgt_service_now
-            )
-            self.table.setCellWidget(tgt_row, tgt_col, tgt_combo)
+        self.refresh_cell(src_row, src_col)
+        self.refresh_cell(tgt_row, tgt_col)
 
         del self._drag_source
         self.refresh_row_headers()
@@ -873,17 +880,13 @@ class MainWindow(QMainWindow):
         if service_id is None:
             return True
         
-        # Backend removal
+        # Backend removal (handles UI refresh automatically through apply_assignment_change)
         self.apply_assignment_change(
             person_id=person.id,
             day=day,
             service_id=None,
             reason="delete"
         )
-
-        # UI update
-        self.table.removeCellWidget(row, column)
-        self.refresh_row_headers()
 
         return True
 
@@ -973,6 +976,9 @@ class MainWindow(QMainWindow):
         header = ClickableHorizontalHeader(self, self.table)
         self.table.setHorizontalHeader(header)
         header.setSectionsClickable(True)
+
+        # Handle note edits (last column)
+        self.table.itemChanged.connect(self._on_item_changed)
 
 
         self.table.horizontalHeader().setStyleSheet("""
@@ -1114,20 +1120,33 @@ class MainWindow(QMainWindow):
         print("Open about dialog (not implemented yet)")
 
     def _open_cell_dropdown(self, row, column):
-        print(f"[OPEN DROPDOWN] row = {row}, column = {column}")
-        combo = self._ensure_combo(row, column)
+        # Don't open for Notes col or section rows
+        row_data = self.rows[row]
+        if row_data["type"] != "person" or column == self.table.columnCount() - 1:
+            return
+
+        # Dynamically create the combo
+        combo = self._create_service_combo(row, column)
         if combo is None:
-            print("[OPEN DROPDOWN] combo is None")
             return
         
-        try:
-            combo.activated.disconnect()
-        except TypeError:
-            pass
+        # Position it over the cell
+        self.table.setCellWidget(row, column, combo)
+        
+        # Handle selection
+        def on_activated(index):
+            combo._service_cell.apply_service_by_index(index)
+            self.table.removeCellWidget(row, column)
+            self.table.viewport().update()
 
-        combo.activated.connect(
-            lambda index, c=combo: c._service_cell.apply_service_by_index(index)
-        )
+        combo.activated.connect(on_activated)
+        
+        # Also remove if it loses focus/closes without selection
+        # (Using a small delay or event filter might be better, but combo.showPopup()
+        # usually takes over focus). 
+        # A simpler way: connect to a signal that fires when popup is hidden.
+        # But QComboBox doesn't have a 'popupHidden' signal directly.
+        # Let's just remove it after it's been used or if row/col changes.
 
         combo.showPopup()
 
@@ -1298,6 +1317,61 @@ class MainWindow(QMainWindow):
             self.schedule[key] = MonthData(*key)
 
         return self.schedule[key], day
+
+    def refresh_cell(self, row, col):
+        """Redraws a single cell (service or note) based on latest backend data."""
+        resolved = self._resolve_person_cell(row, col)
+        if not resolved:
+            return
+        
+        person, month_data, day = resolved
+        
+        # Block signals to avoid recursive _on_item_changed calls
+        self.table.blockSignals(True)
+        
+        item = self.table.item(row, col)
+        if not item:
+            item = QTableWidgetItem()
+            self.table.setItem(row, col, item)
+
+        # 1. Notes Column
+        if col == self.table.columnCount() - 1:
+            item.setText(month_data.get_comment(person.id))
+        
+        # 2. Service Cells
+        else:
+            service_id = month_data.get_service(person.id, day)
+            if service_id:
+                service = next((s for s in self.services if s.id == service_id), None)
+                if service:
+                    item.setText(service.short_name)
+                    item.setBackground(QBrush(QColor(service.color_hex)))
+                else:
+                    item.setText("?")
+                    item.setBackground(QBrush(QColor("#FF5555")))
+            else:
+                item.setText("")
+                item.setBackground(QBrush(Qt.transparent))
+
+        self.table.blockSignals(False)
+
+    def _on_item_changed(self, item):
+        """Handles manual text editing (currently only for the Notes column)."""
+        row = item.row()
+        col = item.column()
+        
+        # Only handle last column (Notes)
+        if col != self.table.columnCount() - 1:
+            return
+
+        resolved = self._resolve_person_cell(row, col)
+        if not resolved: return
+        
+        person, month_data, day = resolved
+        new_text = item.text()
+        
+        if month_data.get_comment(person.id) != new_text:
+            self.apply_comment_change(person.id, new_text)
 
     def get_day_service_violations_for_column(self, column: int):
         """

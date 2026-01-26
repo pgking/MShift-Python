@@ -106,39 +106,36 @@ class TableRebuilder:
 
             person = next(p for p in self.mw.people if p.id == row_data["person_id"])
             for col in range(self.table.columnCount()):
+                # ALWAYS clear previous widgets to regain performance
                 self.table.removeCellWidget(row_index, col)
 
-                # Special case for last column (Notes)
+                # 1. Notes Column (Item with text)
                 if col == self.table.columnCount() - 1:
                     year = int(self.mw.year_combo.currentText())
                     month = self.mw.month_combo.currentIndex() + 1
                     month_data = self.mw.schedule.get((year, month))
                     
-                    comment = ""
-                    if month_data:
-                        comment = month_data.get_comment(person.id)
-                    
-                    edit = QLineEdit(comment)
-                    edit.setFrame(False)
-                    # Use person_id logic to bind the edit
-                    edit.editingFinished.connect(
-                        lambda p_id=person.id, e=edit: self.mw.apply_comment_change(p_id, e.text())
-                    )
-                    self.table.setCellWidget(row_index, col, edit)
+                    comment = month_data.get_comment(person.id) if month_data else ""
+                    item = QTableWidgetItem(comment)
+                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+                    self.table.setItem(row_index, col, item)
                     continue
 
+                # 2. Service Cells (Item with color and short name)
                 month_data, day = self.mw._resolve_day_context(col)
                 service_id = month_data.get_service(person.id, day)
 
-                if service_id is None:
-                    continue
+                item = QTableWidgetItem()
+                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                item.setTextAlignment(Qt.AlignCenter)
 
-                combo = self.mw._create_service_combo(
-                    row_index,
-                    col,
-                    preset_service=service_id
-                )
-                self.table.setCellWidget(row_index, col, combo)
+                if service_id:
+                    service = next((s for s in self.mw.services if s.id == service_id), None)
+                    if service:
+                        item.setText(service.short_name)
+                        item.setBackground(QBrush(QColor(service.color_hex)))
+                
+                self.table.setItem(row_index, col, item)
 
 
 

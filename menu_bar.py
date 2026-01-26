@@ -10,8 +10,8 @@ class MenuBar(QMenuBar):
 
         self._create_file_menu()
         self._create_services_menu()
-        self._create_about_menu()
         self._create_preferences_menu()
+        self._create_about_menu()
 
     def _create_file_menu(self):
         file_menu = self.addMenu("File")
@@ -74,7 +74,11 @@ class MenuBar(QMenuBar):
         about_action = QAction("About mshift", self)
         about_action.triggered.connect(self.parent.open_about_dialog)
 
+        check_update_action = QAction("Check for Updates...", self)
+        check_update_action.triggered.connect(lambda: self.parent.updater.start_check(silent=False))
+
         about_menu.addAction(about_action)
+        about_menu.addAction(check_update_action)
 
     def _create_preferences_menu(self):
         prefs_menu = self.addMenu("Preferences")
