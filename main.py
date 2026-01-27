@@ -34,7 +34,7 @@ from PyQt5.QtGui import (
 # App modules
 from models import Person, Service, MonthData, Schema, SchemaAssignment
 from dialogs import AddPersonDialog, AddServiceDialog, ManageServicesDialog, PreferencesDialog
-from schema_dialogs import CreateSchemaDialog, ManageSchemasDialog, AssignSchemaDialog
+from schema_dialogs import CreateSchemaDialog, ManageSchemasDialog
 from menu_bar import MenuBar
 from exporter import export_to_excel
 from importer import import_from_excel
@@ -552,7 +552,7 @@ class MainWindow(QMainWindow):
         """Open dialog to create a new schema."""
         print("Add Schema clicked")
         dialog = CreateSchemaDialog(self.services, self)
-        if dialog.exec():
+        if dialog.exec_():
             self.controller.schemas.append(dialog.schema)
             self.app_state.save_app_state(self.controller.to_dict())
             
@@ -602,7 +602,13 @@ class MainWindow(QMainWindow):
     
     def open_schemas_dialog(self):
         """Open the dialog to manage schemas."""
-        dialog = ManageSchemasDialog(self.controller.schemas, self.services, self)
+        dialog = ManageSchemasDialog(
+            self.controller.schemas, 
+            self.services, 
+            self.people,
+            self.controller.schema_assignments,
+            self
+        )
         
         if dialog.exec_() == QDialog.Accepted:
             # Save app state after schema changes

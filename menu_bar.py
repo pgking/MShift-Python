@@ -71,16 +71,9 @@ class MenuBar(QMenuBar):
         manage_schemas_action.triggered.connect(
             self.parent.open_schemas_dialog
         )
-        
-        assign_schema_action = QAction("Assigner un Schéma...", self)
-        assign_schema_action.triggered.connect(
-            self.parent.open_assign_schema_dialog
-        )
 
         manage_menu.addAction(manage_services_action)
         manage_menu.addAction(manage_schemas_action)
-        manage_menu.addSeparator()
-        manage_menu.addAction(assign_schema_action)
 
     def _create_about_menu(self):
         about_menu = self.addMenu("About")

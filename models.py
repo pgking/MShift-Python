@@ -137,15 +137,18 @@ class SchemaAssignment:
         repeat_months: Number of months to repeat (only used if repeat_mode="limited")
         start_year: Year when assignment was created
         start_month: Month when assignment was created
+        overwrite_existing: Whether to overwrite existing services when applying
     """
     def __init__(self, person_id: str, schema_id: str, repeat_mode: str = "always", 
-                 repeat_months: int = 1, start_year: int = None, start_month: int = None):
+                 repeat_months: int = 1, start_year: int = None, start_month: int = None,
+                 overwrite_existing: bool = True):
         self.person_id = person_id
         self.schema_id = schema_id
         self.repeat_mode = repeat_mode  # "always" or "limited"
         self.repeat_months = repeat_months
         self.start_year = start_year
         self.start_month = start_month
+        self.overwrite_existing = overwrite_existing
     
     def should_apply_to_month(self, year: int, month: int) -> bool:
         """Check if this assignment should apply to the given month."""
@@ -175,7 +178,8 @@ class SchemaAssignment:
             "repeat_mode": self.repeat_mode,
             "repeat_months": self.repeat_months,
             "start_year": self.start_year,
-            "start_month": self.start_month
+            "start_month": self.start_month,
+            "overwrite_existing": self.overwrite_existing
         }
     
     @staticmethod
@@ -186,7 +190,8 @@ class SchemaAssignment:
             repeat_mode=data.get("repeat_mode", "always"),
             repeat_months=data.get("repeat_months", 1),
             start_year=data.get("start_year"),
-            start_month=data.get("start_month")
+            start_month=data.get("start_month"),
+            overwrite_existing=data.get("overwrite_existing", True)
         )
 
 class MonthData:
