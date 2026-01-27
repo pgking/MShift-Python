@@ -59,14 +59,14 @@ class ScheduleController:
             existing.short_name = "..."
             existing.is_visible = True # FORCE VISIBLE
             
-            # Move to top if not already
-            if self.services.index(existing) != 0:
+            # Move to BOTTOM if not already
+            if self.services.index(existing) != len(self.services) - 1:
                 self.services.remove(existing)
-                self.services.insert(0, existing)
+                self.services.append(existing)
             return
 
-        # Insert at top for visibility
-        self.services.insert(0, Service(
+        # Append to bottom
+        self.services.append(Service(
             name="Note (Texte libre)",
             short_name="...",
             hours=0,
