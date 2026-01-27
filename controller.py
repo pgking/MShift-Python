@@ -31,6 +31,10 @@ class ScheduleController:
         # Derived or temporary state
         self.n_prev_days: int = 0
         
+        # Ensure built-ins (actually need services list to be populated first if saving, but for new app it's empty)
+        # But ensure_builtin_services appends if missing.
+        self.ensure_builtin_services()
+
     def to_dict(self) -> dict:
         """Serializes current app state for persistence."""
         return {
@@ -45,18 +49,51 @@ class ScheduleController:
             "recent_files": self.recent_files
         }
 
+    def ensure_builtin_services(self):
+        note_id = "builtin_note"
+        existing = next((s for s in self.services if s.id == note_id), None)
+        
+        if existing:
+            # Update labels just in case
+            existing.name = "Note (Texte libre)"
+            existing.short_name = "..."
+            existing.is_visible = True # FORCE VISIBLE
+            
+            # Move to top if not already
+            if self.services.index(existing) != 0:
+                self.services.remove(existing)
+                self.services.insert(0, existing)
+            return
+
+        # Insert at top for visibility
+        self.services.insert(0, Service(
+            name="Note (Texte libre)",
+            short_name="...",
+            hours=0,
+            color_hex="#E0E0E0",
+            id=note_id,
+            is_visible=True
+        ))
+
     def from_dict(self, data: dict):
         """Restores state from a dictionary."""
         self.preferences = Preferences.from_dict(data.get("preferences", {}))
-        self.n_prev_days = self.preferences.previous_days_shown
+        
         self.people = [Person(**p) for p in data.get("people", [])]
         self.services = [Service(**s) for s in data.get("services", [])]
+        self.ensure_builtin_services()
+        
         self.schemas = [Schema.from_dict(s) for s in data.get("schemas", [])]
         self.schema_assignments = [SchemaAssignment.from_dict(sa) for sa in data.get("schema_assignments", [])]
+        
         self.rows = data.get("rows", [])
-        self.last_year = data.get("last_year")
         self.last_month = data.get("last_month")
         self.recent_files = data.get("recent_files", [])
+        
+        # Restore derived/temporary state that might have been lost
+        self.n_prev_days = self.preferences.previous_days_shown
+        self.last_year = data.get("last_year")
+
 
     def get_month_data(self, year: int, month: int) -> MonthData:
         if (year, month) not in self.schedule:

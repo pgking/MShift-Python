@@ -19,7 +19,8 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QLabel,
     QMenu,
-    QDialog
+    QDialog,
+    QInputDialog
 )
 from PyQt5.QtCore import (
     Qt,
@@ -49,7 +50,7 @@ from drag_drop_handler import DragDropHandler
 from copy_paste_handler import CopyPasteHandler
 from dev_seed import load_dev_data
 
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 # ============================================================
 # 2. Main Window
@@ -473,7 +474,7 @@ class MainWindow(QMainWindow):
             return combo # Fallback, should not happen
 
         month_data, day = self._resolve_day_context(column)
-
+    
         # Hand over control to ServiceCell
         combo._service_cell = ServiceCell(
             combo = combo,
@@ -566,6 +567,20 @@ class MainWindow(QMainWindow):
         # Don't open for Notes col or section rows
         row_data = self.rows[row]
         if row_data["type"] != "person" or column == self.table.columnCount() - 1:
+            return
+
+        # Toggle: If already open, close it
+        existing = self.table.cellWidget(row, column)
+        if existing:
+            if hasattr(existing, "hidePopup"):
+                existing.hidePopup()
+            
+            # Break cycle to ensure destruction
+            if hasattr(existing, "_service_cell"):
+                existing._service_cell = None
+            
+            self.table.removeCellWidget(row, column)
+            existing.deleteLater()
             return
 
         # Dynamically create the combo
@@ -844,7 +859,18 @@ class MainWindow(QMainWindow):
             if service_id:
                 service = next((s for s in self.services if s.id == service_id), None)
                 if service:
-                    item.setText(service.short_name)
+                    if service.id == "builtin_note":
+                        # Custom Note Logic
+                        note_text = month_data.get_note(person.id, day)
+                        if note_text:
+                            item.setText(note_text)
+                            item.setToolTip(note_text)
+                        else:
+                            item.setText(service.short_name)
+                    else:
+                        item.setText(service.short_name)
+                        item.setToolTip("")
+
                     item.setBackground(QBrush(QColor(service.color_hex)))
                 else:
                     item.setText("?")
@@ -872,6 +898,59 @@ class MainWindow(QMainWindow):
         
         if month_data.get_comment(person.id) != new_text:
             self.apply_comment_change(person.id, new_text)
+
+    def _on_item_double_clicked(self, item):
+        """Handles double-click to edit Note services."""
+        row = item.row()
+        col = item.column()
+        
+        # Skip Notes column (handled by itemChanged)
+        if col == self.table.columnCount() - 1:
+            return
+
+        resolved = self._resolve_person_cell(row, col)
+        if not resolved:
+            return
+
+        person, month_data, day = resolved
+        service_id = month_data.get_service(person.id, day)
+        
+        if service_id == "builtin_note":
+            # Force close combo and its popup
+            combo = self.table.cellWidget(row, col)
+            if combo:
+                if hasattr(combo, "hidePopup"):
+                    combo.hidePopup()
+                
+                # Break cycle
+                if hasattr(combo, "_service_cell"):
+                    combo._service_cell = None
+                
+                self.table.removeCellWidget(row, col)
+                combo.deleteLater()
+            
+            # Force UI update to clear artifacts
+            self.table.viewport().repaint()
+            
+            # Schedule the dialog opening slightly later to allow the event loop
+            # to process the combo destruction/popup closing.
+            QTimer.singleShot(10, lambda: self._open_note_dialog(month_data, person.id, day, row, col))
+
+    def _open_note_dialog(self, month_data, person_id, day, row, col):
+        """Helper to open the note dialog async."""
+        current_text = month_data.get_note(person_id, day) or ""
+        text, ok = QInputDialog.getMultiLineText(
+            self, 
+            "Edit Note", 
+            "Enter text:", 
+            current_text
+        )
+        
+        if ok:
+            month_data.set_note(person_id, day, text)
+            self.refresh_cell(row, col)
+            if self.preferences.auto_save:
+                self.quick_save()
 
     def get_day_service_violations_for_column(self, column: int):
         """

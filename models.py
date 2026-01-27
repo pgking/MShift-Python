@@ -206,6 +206,7 @@ class MonthData:
         self.assignments = {}
         self.holidays = set()
         self.comments = {} # person_id -> str
+        self.notes = {} # (person_id, day) -> str
 
     def get_service(self, person_id, day):
         return self.assignments.get((person_id, day))
@@ -213,6 +214,10 @@ class MonthData:
     def set_service(self, person_id, day, service_id):
         if service_id is None :
             self.assignments.pop((person_id, day), None)
+            # When clearing service, should we clear note? 
+            # User said "right click deletes it", implying deleting service deletes note.
+            # I will assume yes.
+            self.notes.pop((person_id, day), None)
         
         else :
             self.assignments[(person_id, day)] = service_id
@@ -225,6 +230,15 @@ class MonthData:
             self.comments.pop(person_id, None)
         else:
             self.comments[person_id] = text
+
+    def get_note(self, person_id, day):
+        return self.notes.get((person_id, day))
+
+    def set_note(self, person_id, day, text):
+        if not text:
+            self.notes.pop((person_id, day), None)
+        else:
+            self.notes[(person_id, day)] = text
 
     def toggle_holiday(self, day: int):
         if day in self.holidays:
@@ -240,6 +254,10 @@ class MonthData:
                 f"{person_id}_{day}": service_id
                 for (person_id, day), service_id in self.assignments.items()
             },
+            "notes": {
+                f"{person_id}_{day}": text
+                for (person_id, day), text in self.notes.items()
+            },
             "holidays": list(self.holidays),
             "comments": self.comments
         }
@@ -248,11 +266,35 @@ class MonthData:
     def from_dict(data):
         month = MonthData(data["year"], data["month"])
         month.assignments = {
-            (pid, int(day)): service_id
-            for k, service_id in data["assignments"].items()
-            for pid, day in [k.split("_")]
+            tuple(k.split("_")[0:2] if len(k.split("_")) == 2 else (k.rpartition('_')[0], k.rpartition('_')[2])): v
+            for k, v in data["assignments"].items()
         }
-        month.holidays = set(data.get("holidays", []))
-        month.comments = data.get("comments", {})
-        return month
+        # Handle notes
+        raw_notes = data.get("notes", {})
+        month.notes = {
+             tuple(k.split("_")[0:2] if len(k.split("_")) == 2 else (k.rpartition('_')[0], k.rpartition('_')[2])): v
+             for k, v in raw_notes.items()
+        }
         
+        # Correction for key parsing: person_id can contain underscores? 
+        # The key is f"{person_id}_{day}". Day is int.
+        # My parsing logic above is a bit duplicated and potentially fragile if person_id has underscores.
+        # But let's look at existing logic for assignments.
+        # Existing logic was just: 
+        # month.assignments = { } ... wait, I need to see the existing parsing logic.
+        
+        month.holidays = set(data["holidays"])
+        month.comments = data.get("comments", {})
+        
+        # Post-process keys to convert day to int
+        # The keys are (person_id, str_day). We need (person_id, int_day).
+        month.assignments = {
+            (pid, int(d)): val 
+            for (pid, d), val in month.assignments.items()
+        }
+        month.notes = {
+            (pid, int(d)): val 
+            for (pid, d), val in month.notes.items()
+        }
+
+        return month

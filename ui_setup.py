@@ -112,6 +112,9 @@ def _setup_table(mw):
 
     # Handle note edits (last column)
     mw.table.itemChanged.connect(mw._on_item_changed)
+    
+    # Handle double click for Fake Service "Note" editing
+    mw.table.itemDoubleClicked.connect(mw._on_item_double_clicked)
 
     mw.table.horizontalHeader().setStyleSheet("""
         QHeaderView::section {

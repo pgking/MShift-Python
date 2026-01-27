@@ -313,11 +313,17 @@ class ManageServicesDialog(QDialog):
 class PreferencesDialog(QDialog):
     def __init__(self, preferences: Preferences, parent=None):
         super().__init__(parent)
+        self.mw = parent
         self.setWindowTitle("Preferences")
         self.resize(600, 400)
         
         # Work on COPY
         self.preferences = Preferences(**preferences.__dict__)
+        
+        # Backup original appearance values for live preview / cancel
+        if self.mw:
+            self.orig_row_height = self.mw.preferences.row_height
+            self.orig_col_width = self.mw.preferences.column_width
 
         # Main Layout
         main_layout = QVBoxLayout(self)
@@ -409,6 +415,10 @@ class PreferencesDialog(QDialog):
             self.preferences.copy_paste_mode = "linked"
         else:
             self.preferences.copy_paste_mode = "persistent"
+
+        # Appearance
+        self.preferences.row_height = self.row_height_spin.value()
+        self.preferences.column_width = self.col_width_spin.value()
 
         super().accept()
 
@@ -516,6 +526,52 @@ class PreferencesDialog(QDialog):
 
     def _build_appearance_page(self):
         page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.addStretch()
+        layout = QFormLayout(page)
+        
+        title = QLabel("Grid Appearance")
+        title.setStyleSheet("font-weight: bold;")
+        title.setAlignment(Qt.AlignCenter)
+        
+        layout.addRow(title)
+        
+        self.row_height_spin = QSpinBox()
+        self.row_height_spin.setRange(20, 200)
+        self.row_height_spin.setValue(self.preferences.row_height)
+        self.row_height_spin.setSuffix(" px")
+        
+        self.col_width_spin = QSpinBox()
+        self.col_width_spin.setRange(20, 200)
+        self.col_width_spin.setValue(self.preferences.column_width)
+        self.col_width_spin.setSuffix(" px")
+        
+        layout.addRow("Row Height:", self.row_height_spin)
+        layout.addRow("Day Column Width:", self.col_width_spin)
+        
+        # Add explanation
+        info_label = QLabel(
+            "\nNote: The 'Notes' column automatically resizes to fit its content."
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #666; font-style: italic;")
+        layout.addRow(info_label)
+        
+        self.row_height_spin.valueChanged.connect(self._on_appearance_changed)
+        self.col_width_spin.valueChanged.connect(self._on_appearance_changed)
+        
         self._add_page(page)
+
+    def _on_appearance_changed(self):
+        if not self.mw: return
+        self.mw.preferences.row_height = self.row_height_spin.value()
+        self.mw.preferences.column_width = self.col_width_spin.value()
+        self.mw.finalize_table_setup()
+
+    def reject(self):
+        if self.mw:
+            # Restore original values
+            self.mw.preferences.row_height = self.orig_row_height
+            self.mw.preferences.column_width = self.orig_col_width
+            self.mw.finalize_table_setup()
+        super().reject()
+
+

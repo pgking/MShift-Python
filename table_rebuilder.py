@@ -1,6 +1,6 @@
 import calendar
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QTableWidgetItem
+from PyQt5.QtWidgets import QTableWidgetItem, QHeaderView
 from PyQt5.QtGui import QColor, QBrush
 
 
@@ -15,12 +15,17 @@ class TableRebuilder:
 
         self.rebuild_structure_and_rows()
 
+        # Row Height
+        self.table.verticalHeader().setDefaultSectionSize(self.mw.preferences.row_height)
+
         # Column width
         for col in range(self.table.columnCount()):
             if col == self.table.columnCount() - 1:
-                self.table.setColumnWidth(col, 200)
+                # Notes Column - Dynamic Width
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
             else:
-                self.table.setColumnWidth(col, 55)
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.Fixed)
+                self.table.setColumnWidth(col, self.mw.preferences.column_width)
         # Ensure section rows have no stray items
         for row, row_data in enumerate(self.mw.rows):
             if row_data["type"] == "section":
@@ -132,7 +137,18 @@ class TableRebuilder:
                 if service_id:
                     service = next((s for s in self.mw.services if s.id == service_id), None)
                     if service:
-                        item.setText(service.short_name)
+                        if service.id == "builtin_note":
+                            # Custom Note Logic
+                            note_text = month_data.get_note(person.id, day)
+                            if note_text:
+                                item.setText(note_text)
+                                item.setToolTip(note_text)
+                            else:
+                                item.setText(service.short_name) # "📝"
+                        else:
+                            # Standard service
+                            item.setText(service.short_name)
+                        
                         item.setBackground(QBrush(QColor(service.color_hex)))
                 
                 self.table.setItem(row_index, col, item)

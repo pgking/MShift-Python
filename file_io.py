@@ -40,6 +40,9 @@ def apply_loaded_data(controller, data):
         controller.services.append(
             Service("Inconnu", "?", 0, "#FF5555", id="unknown", is_visible=False)
         )
+    
+    # Ensure builtin services (Notes)
+    controller.ensure_builtin_services()
 
     # Rebuild row (sections and ordering)
     controller.rows = data.get("rows", [])

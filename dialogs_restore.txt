@@ -1,0 +1,131 @@
+    def _build_general_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        title = QLabel(
+            "General"
+        )
+        title.setStyleSheet("font-weight: bold;")
+        title.setAlignment(Qt.AlignCenter)
+
+        days_label = QLabel("Number of previous month days shown : ")
+        self.prev_days_spin = QSpinBox()
+        self.prev_days_spin.setRange(0, 7)
+        self.prev_days_spin.setValue(self.preferences.previous_days_shown)
+
+        layout.addWidget(title)
+        layout.addSpacing(10)
+        layout.addWidget(days_label)
+        layout.addWidget(self.prev_days_spin)
+
+        layout.addSpacing(20)
+
+        self.auto_save_checkbox = QCheckBox("Auto-save changes to current file")
+        self.auto_save_checkbox.setToolTip("Automatically saves the schedule to disk every time you make a change.")
+        self.auto_save_checkbox.setChecked(self.preferences.auto_save)
+        layout.addWidget(self.auto_save_checkbox)
+
+        layout.addStretch()
+
+        self._add_page(page)
+
+    def _build_behavior_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        title = QLabel("Behavior Settings")
+        title.setStyleSheet("font-weight: bold;")
+        title.setAlignment(Qt.AlignCenter)
+
+        layout.addWidget(title)
+        layout.addSpacing(10)
+
+        copy_title = QLabel("Copy / Paste behavior :")
+        copy_title.setStyleSheet("font-weight: bold;")
+
+        layout.addWidget(copy_title)
+        layout.addWidget(self.copy_linked_radio)
+        layout.addWidget(self.copy_persistent_radio)
+
+        layout.addSpacing(15)
+
+        # Paste overide behavior
+        self.paste_overwrite_checkbox = QCheckBox("Allow paste to overwrite existing services")
+        self.paste_overwrite_checkbox.setChecked(self.preferences.paste_overwrite_existing)
+        
+        layout.addWidget(self.paste_overwrite_checkbox)
+
+        layout.addSpacing(20)
+
+        # Copy and paste behavior radios
+        self.copy_paste_radios = QButtonGroup(page)
+        self.copy_paste_radios.addButton(self.copy_linked_radio)
+        self.copy_paste_radios.addButton(self.copy_persistent_radio)
+        self.copy_linked_radio.setToolTip(
+            "Paste only works if the original copied cell is unchanged"
+        )
+        self.copy_persistent_radio.setToolTip(
+            "Paste always uses the last copied service, even if the source cell changed"
+        )
+
+        # Drag and Drop behavior
+        drag_label = QLabel("When dragging a service onto another one :")
+        drag_label.setAlignment(Qt.AlignLeft)
+
+        self.drag_mode_combo = QComboBox()
+        self.drag_mode_combo.addItem("Swap services", "swap")
+        self.drag_mode_combo.addItem("Replace existing service", "replace")
+        self.drag_mode_combo.addItem("Ask on drop", "ask")
+
+        # Set current value from preferences
+        index = self.drag_mode_combo.findData(
+            self.preferences.drag_drop_mode
+        )
+        if index >= 0:
+            self.drag_mode_combo.setCurrentIndex(index)
+
+        layout.addSpacing(20)
+        layout.addWidget(drag_label)
+        layout.addWidget(self.drag_mode_combo)
+        layout.addStretch()
+
+        self._add_page(page)
+
+    def _build_shortcuts_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addStretch()
+        self._add_page(page)
+
+    def _build_appearance_page(self):
+        page = QWidget()
+        layout = QFormLayout(page)
+        
+        title = QLabel("Grid Appearance")
+        title.setStyleSheet("font-weight: bold;")
+        title.setAlignment(Qt.AlignCenter)
+        
+        layout.addRow(title)
+        
+        self.row_height_spin = QSpinBox()
+        self.row_height_spin.setRange(20, 200)
+        self.row_height_spin.setValue(self.preferences.row_height)
+        self.row_height_spin.setSuffix(" px")
+        
+        self.col_width_spin = QSpinBox()
+        self.col_width_spin.setRange(20, 200)
+        self.col_width_spin.setValue(self.preferences.column_width)
+        self.col_width_spin.setSuffix(" px")
+        
+        layout.addRow("Row Height:", self.row_height_spin)
+        layout.addRow("Day Column Width:", self.col_width_spin)
+        
+        # Add explanation
+        info_label = QLabel(
+            "\nNote: The 'Notes' column automatically resizes to fit its content."
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #666; font-style: italic;")
+        layout.addRow(info_label)
+        
+        self._add_page(page)

@@ -15,6 +15,10 @@ class Preferences:
     # Swap | Replace | Ask
     drag_drop_mode: str = "swap"
 
+    # Appearance
+    row_height: int = 50
+    column_width: int = 40
+
     def to_dict(self):
         return self.__dict__.copy()
 

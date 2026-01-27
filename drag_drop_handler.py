@@ -39,6 +39,9 @@ class DragDropHandler:
                         tgt_person, tgt_day, tgt_month_data):
         
         src_service_id = src_month_data.get_service(src_person.id, src_day)
+        # Capture Note
+        src_note = src_month_data.get_note(src_person.id, src_day)
+        
         if src_service_id is None:
             return
         
@@ -57,12 +60,19 @@ class DragDropHandler:
             service_id=src_service_id,
             reason="drag_replace_target"
         )
+        
+        # Apply Note to target
+        if src_service_id == "builtin_note":
+             tgt_month_data.set_note(tgt_person.id, tgt_day, src_note)
 
     def swap_services(self, src_person, src_day, src_month_data,
                       tgt_person, tgt_day, tgt_month_data):
         
         src_service_id = src_month_data.get_service(src_person.id, src_day)
         tgt_service_id = tgt_month_data.get_service(tgt_person.id, tgt_day)
+        
+        src_note = src_month_data.get_note(src_person.id, src_day)
+        tgt_note = tgt_month_data.get_note(tgt_person.id, tgt_day)
 
         if src_service_id is None and tgt_service_id is None:
             return
@@ -80,6 +90,17 @@ class DragDropHandler:
             service_id=src_service_id,
             reason="drag_swap_target"
         )
+        
+        # Apply Notes
+        if src_service_id == "builtin_note":
+             tgt_month_data.set_note(tgt_person.id, tgt_day, src_note)
+        else:
+             tgt_month_data.set_note(tgt_person.id, tgt_day, None) # Ensure clear if not note
+        
+        if tgt_service_id == "builtin_note":
+             src_month_data.set_note(src_person.id, src_day, tgt_note)
+        else:
+             src_month_data.set_note(src_person.id, src_day, None) # Ensure clear if not note
 
     def handle_drop(self, source_index, pos):
         if self.drag_source is None:

@@ -12,6 +12,7 @@ class CopyPasteHandler:
         self.mw = mw
         self.clipboard_service_id = None
         self.clipboard_cell = None
+        self.clipboard_note_text = None
 
     def is_clipboard_valid(self) -> bool:
         """
@@ -92,6 +93,12 @@ class CopyPasteHandler:
             
             self.clipboard_service_id = service_id
             self.clipboard_cell = (index.row(), index.column())
+            
+            # Capture Note
+            if service_id == "builtin_note":
+                self.clipboard_note_text = month_data.get_note(person.id, day)
+            else:
+                self.clipboard_note_text = None
 
             self.mw.table.viewport().update()
             return True
@@ -130,18 +137,13 @@ class CopyPasteHandler:
                 service_id=self.clipboard_service_id,
                 reason="paste"
             )
+            
+            # Apply Note if needed
+            if self.clipboard_service_id == "builtin_note":
+                month_data.set_note(person.id, day, self.clipboard_note_text)
 
-            # UI Reprojection
-            self.mw.table.removeCellWidget(index.row(), index.column())
-
-            combo = self.mw._create_service_combo(
-                index.row(),
-                index.column(),
-                preset_service=self.clipboard_service_id
-            )
-
-            self.mw.table.setCellWidget(index.row(), index.column(), combo)
-
+            # UI Update
+            self.mw.refresh_cell(index.row(), index.column())
             self.mw.refresh_row_headers()
             return True
         
