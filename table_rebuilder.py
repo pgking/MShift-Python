@@ -12,6 +12,10 @@ class TableRebuilder:
     def finalize(self):
         # 1️⃣ Freeze painting while we rebuild
         self.table.setUpdatesEnabled(False)
+        
+        # Clear header stats
+        if hasattr(self.table.verticalHeader(), "clear_stats"):
+             self.table.verticalHeader().clear_stats()
 
         self.rebuild_structure_and_rows()
 
@@ -88,10 +92,19 @@ class TableRebuilder:
         # 1️⃣ Structure: rows, columns, horizontal headers
         self.rebuild_structure()
 
+        year = int(self.mw.year_combo.currentText())
+        month = self.mw.month_combo.currentIndex() + 1
+
         # 2️⃣ Vertical headers (sections + people)
         for row_index, row_data in enumerate(self.mw.rows):
             if row_data["type"] == "section":
                 self._build_section_row(row_index, row_data["label"])
+            elif row_data["type"] == "person":
+                # Populate Header Stats
+                person_id = row_data["person_id"]
+                stats = self.mw.controller.calculate_stats_for_month(person_id, year, month)
+                if hasattr(self.table.verticalHeader(), "set_person_stats"):
+                     self.table.verticalHeader().set_person_stats(row_index, stats)
 
     def _build_section_row(self, row_index: int, label: str):
         item = QTableWidgetItem(label)

@@ -1,4 +1,5 @@
 from typing import Dict, List, Optional, Tuple
+import calendar
 from models import MonthData, Person, Service, Schema, SchemaAssignment
 from rules import evaluate_rules, DayServiceViolation, Rule, DEFAULT_RULES
 from preferences import Preferences
@@ -146,6 +147,49 @@ class ScheduleController:
         """Get all schema assignments for a specific person."""
         return [sa for sa in self.schema_assignments if sa.person_id == person_id]
     
+
+    
+    def calculate_stats_for_month(self, person_id, year, month):
+        """
+        Calculate visual stats for the person list (Nights, Weekends).
+        """
+        month_data = self.get_month_data(year, month)
+        
+        # Identify Night service (search for 'N' or 'Nuit')
+        night_service = next((s for s in self.services if s.short_name == "N" or s.name.lower() == "nuit"), None)
+        night_id = night_service.id if night_service else None
+        
+        night_count = 0
+        sat_count = 0
+        sun_count = 0
+        
+        # Iterate all days (get_service handles valid range internally, but best to loop days)
+        # Use simple day iteration
+        _, days_in_month = calendar.monthrange(year, month)
+        
+        for d in range(1, days_in_month + 1):
+            service_id = month_data.get_service(person_id, d)
+            
+            if service_id is not None:
+                # Night Check
+                if night_id and service_id == night_id:
+                    night_count += 1
+                
+                # Weekend Check (Any service)
+                weekday = calendar.weekday(year, month, d)
+                if weekday == calendar.SATURDAY:
+                    sat_count += 1
+                elif weekday == calendar.SUNDAY:
+                    sun_count += 1
+                    
+        return {
+            "night_count": night_count,
+            "weekend_stats": (sat_count, sun_count),
+            "night_color": night_service.color_hex if night_service else "#000000",
+            # Hardcoded gray for weekend shading to match typical UI style
+            "weekend_color": "#C8C8C8" 
+        }
+
     def apply_schema_to_month(self, schema: Schema, person_id: str, year: int, month: int, 
                              overwrite: bool = True, start_period: tuple = None):
         """

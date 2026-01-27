@@ -1,6 +1,6 @@
 from PyQt5.QtCore import Qt, QRect, QPoint
 from PyQt5.QtWidgets import QHeaderView, QMenu, QToolTip
-from PyQt5.QtGui import QPainter, QPen, QColor, QPolygon
+from PyQt5.QtGui import QPainter, QPen, QColor, QPolygon, QBrush
 
 from rules import Severity
 
@@ -8,6 +8,7 @@ class ColoredVerticalHeader(QHeaderView):
     def __init__(self, main_window, parent=None):
         super().__init__(Qt.Vertical, parent)
         self._row_colors = {}
+        self._person_stats = {} # {row_index: stats_dict}
         self.main_window = main_window
         self.setMouseTracking(True)
         self._drop_indicator_row = None
@@ -15,6 +16,15 @@ class ColoredVerticalHeader(QHeaderView):
     def set_row_color(self, row, color):
         self._row_colors[row] = color
         self.viewport().update()
+
+    def set_person_stats(self, row, stats):
+        self._person_stats[row] = stats
+        # Trigger update of this section?
+        # self.headerDataChanged(Qt.Vertical, row, row) usually works but viewport update is safer
+        self.viewport().update()
+
+    def clear_stats(self):
+        self._person_stats.clear()
 
     def paintSection(self, painter, rect, logicalIndex):
         color = self._row_colors.get(logicalIndex)
@@ -27,6 +37,50 @@ class ColoredVerticalHeader(QHeaderView):
         painter.save()
         painter.setBrush(Qt.NoBrush)
         super().paintSection(painter, rect, logicalIndex)
+        painter.restore()
+
+        # Draw Stats if available
+        stats = self._person_stats.get(logicalIndex)
+        if stats:
+            self._paint_stats_circles(painter, rect, stats)
+
+    def _get_stats_geometry(self, rect):
+        """Returns (night_rect, weekend_rect) relative to rect."""
+        circle_size = 10
+        margin_right = 6
+        spacing = 4
+        
+        # Right aligned
+        x = rect.right() - margin_right - circle_size
+        
+        # Centered vertically
+        total_h = (2 * circle_size) + spacing
+        start_y = rect.center().y() - (total_h / 2) + (circle_size / 2)
+        
+        night_rect = QRect(x, int(start_y - circle_size/2), circle_size, circle_size)
+        weekend_rect = QRect(x, int(start_y + circle_size/2 + spacing), circle_size, circle_size)
+        
+        return night_rect, weekend_rect
+
+    def _paint_stats_circles(self, painter, rect, stats):
+        night_rect, weekend_rect = self._get_stats_geometry(rect)
+        
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        
+        # Night Circle
+        if stats["night_count"] is not None:
+             col_hex = stats.get("night_color", "#000000")
+             painter.setBrush(QBrush(QColor(col_hex)))
+             painter.drawEllipse(night_rect)
+
+        # Weekend Circle
+        if stats["weekend_stats"] is not None:
+             col_hex = stats.get("weekend_color", "#C8C8C8")
+             painter.setBrush(QBrush(QColor(col_hex)))
+             painter.drawEllipse(weekend_rect)
+
         painter.restore()
 
     def paintEvent(self, event):
@@ -63,12 +117,44 @@ class ColoredVerticalHeader(QHeaderView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        # 1. Handle Stats Tooltips
+        index = self.logicalIndexAt(event.pos())
+        tooltip_shown = False
+        
+        if index >= 0:
+            stats = self._person_stats.get(index)
+            if stats:
+                y = self.sectionViewportPosition(index)
+                h = self.sectionSize(index)
+                # Reconstruct absolute rect for hit testing geometry logic
+                # (Geometry logic expects rect based on section position?)
+                # _get_stats_geometry uses rect.right(), rect.center().
+                # so we need visual rect relative to viewport.
+                rect = QRect(0, y, self.width(), h)
+                
+                night_rect, weekend_rect = self._get_stats_geometry(rect)
+                
+                pos = event.pos()
+                if night_rect.contains(pos) and stats["night_count"] is not None:
+                    QToolTip.showText(event.globalPos(), f"Nuits : {stats['night_count']}", self)
+                    tooltip_shown = True
+                elif weekend_rect.contains(pos) and stats["weekend_stats"] is not None:
+                    sat, sun = stats["weekend_stats"]
+                    QToolTip.showText(event.globalPos(), f"Samedi : {sat}, Dimanche : {sun}", self)
+                    tooltip_shown = True
+
+        if not tooltip_shown:
+             # Hide tooltip if we moved out of circle but still in header?
+             # QToolTip.hideText() # This might flicker if moving fast?
+             # But we must allow super behavior?
+             pass
+
+        # 2. Handle Row Dragging
         if not self.main_window._row_dragging:
             super().mouseMoveEvent(event)
             return
         
         pos = event.pos()
-        index = self.logicalIndexAt(event.pos())
         if index < 0:
             self._drop_indicator_row = None
             self.viewport().update()

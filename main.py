@@ -50,7 +50,7 @@ from drag_drop_handler import DragDropHandler
 from copy_paste_handler import CopyPasteHandler
 from dev_seed import load_dev_data
 
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 
 # ============================================================
 # 2. Main Window
@@ -293,6 +293,11 @@ class MainWindow(QMainWindow):
 
             color = self.workload.status_color(summary.ratio)
             header.set_row_color(row_index, color)
+
+            # Update Stats Circles
+            if hasattr(header, "set_person_stats"):
+                stats = self.controller.calculate_stats_for_month(person.id, year, month)
+                header.set_person_stats(row_index, stats)
 
         # FORCE visual update of the vertical header
         header.viewport().update()
