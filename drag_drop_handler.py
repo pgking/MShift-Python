@@ -115,6 +115,15 @@ class DragDropHandler:
 
         src_person, src_month_data, src_day = resolved_source
 
+        # Check if dragging onto itself - do nothing
+        if (src_person.id == tgt_person.id and 
+            src_day == tgt_day and 
+            src_month_data.year == tgt_month_data.year and 
+            src_month_data.month == tgt_month_data.month):
+            # Dropping onto itself, just cancel the drag
+            self.drag_source = None
+            return
+
         target_service_id = tgt_month_data.get_service(
             tgt_person.id,
             tgt_day

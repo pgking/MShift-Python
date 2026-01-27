@@ -118,11 +118,15 @@ class Schema:
     
     @staticmethod
     def from_dict(data):
+        raw_pattern = data.get("pattern", {})
+        # Convert keys back to integers (JSON mandates string keys)
+        pattern = {int(k): v for k, v in raw_pattern.items() if str(k).isdigit()}
+        
         return Schema(
             name=data["name"],
             start_weekday=data["start_weekday"],
             span_days=data["span_days"],
-            pattern=data.get("pattern", {}),
+            pattern=pattern,
             id=data.get("id")
         )
 

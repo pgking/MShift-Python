@@ -1,6 +1,22 @@
+# Test data and files
 /Test
+Test/Excel test.xlsx
+
+# Build artifacts
 /build
 /dist
 *.spec
-/Test
-Test/Excel test.xlsx
+
+# Test artifacts
+test_output.txt
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

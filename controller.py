@@ -109,43 +109,114 @@ class ScheduleController:
         """Get all schema assignments for a specific person."""
         return [sa for sa in self.schema_assignments if sa.person_id == person_id]
     
-    def apply_schema_to_month(self, schema: Schema, person_id: str, year: int, month: int):
+    def apply_schema_to_month(self, schema: Schema, person_id: str, year: int, month: int, 
+                             overwrite: bool = True, start_period: tuple = None):
         """
         Apply a schema pattern to a person for a specific month.
-        The schema repeats on matching weekdays throughout the month.
+        The schema repeats continuously across month boundaries based on the assignment start date.
+        
+        Args:
+            schema: The schema to apply
+            person_id: ID of the person
+            year: Target year
+            month: Target month
+            overwrite: If True, overwrite existing services
+            start_period: Tuple (start_year, start_month) of when the assignment started.
+                          If None, defaults to current month (starts fresh).
         """
         import calendar as cal
+        from datetime import date, timedelta
         
         month_data = self.get_month_data(year, month)
         days_in_month = cal.monthrange(year, month)[1]
         
-        # Iterate through all days in the month
-        for day in range(1, days_in_month + 1):
-            weekday = cal.weekday(year, month, day)  # 0=Monday, 6=Sunday
+        # Determine the anchor date based on assignment start
+        if start_period:
+            start_year, start_month = start_period
+            # Validate start_month
+            if start_month < 1 or start_month > 12:
+                start_year, start_month = year, month
+        else:
+            start_year, start_month = year, month
             
-            # Check if this day matches the schema's starting weekday
-            if weekday == schema.start_weekday:
-                # Calculate which occurrence of this weekday this is
-                occurrence = 0
-                for d in range(1, day + 1):
-                    if cal.weekday(year, month, d) == schema.start_weekday:
-                        occurrence += 1
+        # 1. Find the very first potential start day in the assignment's start month
+        anchor_date = None
+        s_days = cal.monthrange(start_year, start_month)[1]
+        for d in range(1, s_days + 1):
+            if cal.weekday(start_year, start_month, d) == schema.start_weekday:
+                anchor_date = date(start_year, start_month, d)
+                break
+        
+        if anchor_date is None:
+            # Should not happen as every month has all weekdays
+            return
+
+        # 2. Determine Cycle Length (Multiple of 7 days to ensure it always starts on same weekday)
+        # If span is 5 days, cycle is 7 days (Mon-Fri work, Sat-Sun gap, Start Mon)
+        # If span is 10 days, cycle is 14 days (Mon week 1 to Wed week 2, Gap until Mon week 3)
+        import math
+        cycle_weeks = math.ceil(max(1, schema.span_days) / 7)
+        cycle_length_days = cycle_weeks * 7
+
+        # 3. Apply pattern to the requested month
+        for day in range(1, days_in_month + 1):
+            current_date = date(year, month, day)
+            
+            # Calculate days since the anchor date
+            days_since_anchor = (current_date - anchor_date).days
+            
+            # Calculate position in the cycle
+            # Note: Python's modulo operator handles negative numbers correctly for cyclical patterns
+            # e.g. -5 % 7 = 2, which correctly maps 'Wednesday' back from a 'Monday' anchor
+            position_in_cycle = days_since_anchor % cycle_length_days
+            
+            # If we are within the active span of the cycle, apply service
+            if position_in_cycle < schema.span_days:
+                # Get service for this position
+                service_id = schema.get_service(position_in_cycle)
                 
-                # Calculate the offset in the pattern (cyclically repeating)
-                pattern_offset = ((occurrence - 1) * 7) % schema.span_days
-                
-                # Apply services for the next span_days starting from this day
-                for offset in range(schema.span_days):
-                    target_day = day + offset
-                    if target_day > days_in_month:
-                        break
-                    
-                    service_id = schema.get_service(offset)
-                    if service_id:
-                        month_data.set_service(person_id, target_day, service_id)
-                
-                # Move to next week to avoid overlapping applications
-                # (we apply the full pattern starting from each matching weekday)
+                if service_id:
+                    existing_service = month_data.get_service(person_id, day)
+                    if overwrite or existing_service is None:
+                        month_data.set_service(person_id, day, service_id)
+    
+    def apply_assignment(self, assignment):
+        """
+        Apply a schema assignment fully across its duration.
+        """
+        schema = self.get_schema_by_id(assignment.schema_id)
+        if not schema:
+            return
+            
+        start_year = assignment.start_year
+        start_month = assignment.start_month
+        if not start_year or not start_month:
+            return
+
+        limit = 0
+        if assignment.repeat_mode == "limited":
+            limit = assignment.repeat_months
+        elif assignment.repeat_mode == "always":
+            limit = 24  # Apply for 2 years (reasonable horizon)
+            
+        overwrite = getattr(assignment, 'overwrite_existing', True)
+        start_period = (start_year, start_month)
+        
+        # Determine start index (months from year 0)
+        start_idx = start_year * 12 + (start_month - 1)
+        
+        for i in range(limit):
+            current_idx = start_idx + i
+            y = current_idx // 12
+            m = (current_idx % 12) + 1
+            
+            self.apply_schema_to_month(
+                schema,
+                assignment.person_id,
+                y, m,
+                overwrite,
+                start_period=start_period
+            )
     
     def auto_apply_schemas(self, year: int, month: int):
         """
@@ -162,5 +233,15 @@ class ScheduleController:
             if not schema:
                 continue
             
-            # Apply the schema to this person
-            self.apply_schema_to_month(schema, assignment.person_id, year, month)
+            # Apply the schema to this person with the assignment's overwrite setting
+            overwrite = getattr(assignment, 'overwrite_existing', True)  # Default to True for old assignments
+            start_period = (assignment.start_year, assignment.start_month) if assignment.start_year else None
+            
+            self.apply_schema_to_month(
+                schema, 
+                assignment.person_id, 
+                year, 
+                month, 
+                overwrite,
+                start_period=start_period
+            )

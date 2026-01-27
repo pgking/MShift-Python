@@ -18,13 +18,16 @@ from PyQt5.QtWidgets import (
     QCheckBox
 )
 from PyQt5.QtGui import QColor, QBrush, QPainter, QPen
-from PyQt5.QtCore import Qt, QEvent, QPoint
+from PyQt5.QtCore import Qt, QEvent, QPoint, pyqtSignal
 
 from models import Schema
 
 
 class SchemaPatternTable(QTableWidget):
     """Custom table widget for schema pattern editing with drag/drop and copy/paste support."""
+    
+    # Signal emitted when a service is pasted (col, service_id)
+    servicePasted = pyqtSignal(int, str)
     
     def __init__(self, services, parent=None):
         super().__init__(parent)
@@ -121,6 +124,9 @@ class SchemaPatternTable(QTableWidget):
                 item.setBackground(QBrush(QColor(service.color_hex)))
                 item.setTextAlignment(Qt.AlignCenter)
                 item.setData(Qt.UserRole, service.id)
+                
+                # Emit signal to update underlying model
+                self.servicePasted.emit(index.column(), service.id)
             
             return True
         
@@ -424,6 +430,10 @@ class ManageSchemasDialog(QDialog):
         self.schema_assignments = schema_assignments  # List of SchemaAssignment objects
         self.current_schema = None
         
+        # Store references for Apply button functionality
+        self.main_window = parent
+        self.controller = parent.controller if parent else None
+        
         main_layout = QHBoxLayout(self)
         
         # ====================
@@ -440,11 +450,15 @@ class ManageSchemasDialog(QDialog):
         btn_layout = QHBoxLayout()
         self.create_btn = QPushButton("Créer")
         self.delete_btn = QPushButton("Supprimer")
+        self.save_btn = QPushButton("Enregistrer")
+        
         btn_layout.addWidget(self.create_btn)
         btn_layout.addWidget(self.delete_btn)
+        btn_layout.addWidget(self.save_btn)
         
         self.create_btn.clicked.connect(self._on_create)
         self.delete_btn.clicked.connect(self._on_delete)
+        self.save_btn.clicked.connect(self._on_save_clicked)
         
         left_layout.addWidget(QLabel("Schémas:"))
         left_layout.addWidget(self.schema_list)
@@ -491,6 +505,7 @@ class ManageSchemasDialog(QDialog):
         self.pattern_table.verticalHeader().setVisible(False)
         self.pattern_table.setMaximumHeight(120)
         self.pattern_table.cellClicked.connect(self._on_cell_clicked)
+        self.pattern_table.servicePasted.connect(self._on_service_pasted)
         
         right_layout.addWidget(self.pattern_table)
         
@@ -696,6 +711,14 @@ class ManageSchemasDialog(QDialog):
             
             # Update schema
             self.current_schema.pattern[col] = service.id
+
+    def _on_service_pasted(self, col, service_id):
+        """Handle service pasted into pattern table."""
+        if not self.current_schema:
+            return
+        
+        # Update schema pattern
+        self.current_schema.pattern[col] = service_id
     
     def _load_assignments(self):
         """Load assignments for the current schema."""
@@ -781,6 +804,13 @@ class ManageSchemasDialog(QDialog):
         
         row_layout.addWidget(overwrite_check)
         
+        # Apply button (for debugging/manual application)
+        apply_btn = QPushButton("Apply")
+        apply_btn.setFixedWidth(60)
+        apply_btn.setToolTip("Appliquer ce schéma au mois actuel (pour test)")
+        apply_btn.clicked.connect(lambda: self._apply_assignment_to_current_month(assignment, person_combo))
+        row_layout.addWidget(apply_btn)
+        
         # Remove button
         remove_btn = QPushButton("−")
         remove_btn.setFixedWidth(30)
@@ -843,8 +873,8 @@ class ManageSchemasDialog(QDialog):
                 schema_id=self.current_schema.id,
                 repeat_mode=repeat_combo.currentData(),
                 repeat_months=months_spin.value(),
-                start_year=0,  # Will be set when applied
-                start_month=0,
+                start_year=int(self.main_window.year_combo.currentText()) if self.main_window else 2024,
+                start_month=self.main_window.month_combo.currentIndex() + 1 if self.main_window else 1,
                 overwrite_existing=overwrite_check.isChecked()
             )
             self.schema_assignments.append(new_assignment)
@@ -858,6 +888,56 @@ class ManageSchemasDialog(QDialog):
         # Remove widget
         row_widget.deleteLater()
         self.assignments_layout.removeWidget(row_widget)
+    
+    def _apply_assignment_to_current_month(self, assignment, person_combo):
+        """Apply this assignment to the current month (for debugging/testing)."""
+        if not assignment or not self.current_schema:
+            return
+        
+        person_id = person_combo.currentData()
+        if not person_id:
+            return
+        
+        # Get current year/month from main window if possible
+        try:
+            from PyQt5.QtWidgets import QMessageBox
+            year = self.main_window.year_combo.currentText()
+            month = self.main_window.month_combo.currentIndex() + 1
+            
+            # Update assignment start date to current view
+            # This ensures the schema starts (or restarts) from the month the user is effectively looking at
+            assignment.start_year = int(year)
+            assignment.start_month = month
+            
+            # Apply the schema fully using controller logic
+            self.controller.apply_assignment(assignment)
+            
+            # Save the state explicitly
+            self.main_window.app_state.save_app_state(self.controller.to_dict())
+            
+            # Refresh the main window
+            self.main_window.finalize_table_setup()
+            
+            # Get person name
+            person_name = assignment.person_id
+            person = next((p for p in self.people if p.id == assignment.person_id), None)
+            if person:
+                person_name = person.display_name
+            
+            mode_text = "pour 24 mois (2 ans)" if assignment.repeat_mode == "always" else f"pour {assignment.repeat_months} mois"
+            
+            QMessageBox.information(
+                self,
+                "Schéma Appliqué",
+                f"Schéma appliqué pour {person_name}\n\nDurée: {mode_text}\nDébut: {assignment.start_month}/{assignment.start_year}"
+            )
+        except Exception as e:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Erreur",
+                f"Impossible d'appliquer le schéma: {str(e)}"
+            )
     
     def _on_create(self):
         """Open create schema dialog."""
@@ -877,6 +957,21 @@ class ManageSchemasDialog(QDialog):
         del self.schemas[idx]
         self.current_schema = None
         self._refresh_schema_list()
+
+    def _on_save_clicked(self):
+        """Save changes to disk immediately."""
+        if not self.main_window:
+            return
+            
+        try:
+            from PyQt5.QtWidgets import QMessageBox
+            # Save using main window's app state manager
+            self.main_window.app_state.save_app_state(self.controller.to_dict())
+            
+            QMessageBox.information(self, "Succès", "Sauvegarde effectuée avec succès !")
+        except Exception as e:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Erreur", f"Erreur lors de la sauvegarde: {str(e)}")
 
 
 class AssignSchemaDialog(QDialog):

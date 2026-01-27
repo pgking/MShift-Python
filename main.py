@@ -49,7 +49,7 @@ from drag_drop_handler import DragDropHandler
 from copy_paste_handler import CopyPasteHandler
 from dev_seed import load_dev_data
 
-VERSION = "1.0.1"
+VERSION = "1.0.3"
 
 # ============================================================
 # 2. Main Window
@@ -640,7 +640,9 @@ class MainWindow(QMainWindow):
                     dialog.selected_schema,
                     person.id,
                     year,
-                    month
+                    month,
+                    overwrite=True,  # Default to overwriting
+                    start_period=(year, month)
                 )
             
             # Refresh UI
