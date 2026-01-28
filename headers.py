@@ -142,6 +142,16 @@ class ColoredVerticalHeader(QHeaderView):
         manage_action.triggered.connect(lambda: self.main_window.open_people_dialog(person.id))
         menu.addAction(manage_action)
         
+        # Apply Schema Submenu
+        schemas = self.main_window.controller.schemas
+        if schemas:
+            apply_schema_menu = menu.addMenu("Apply Schema")
+            for schema in schemas:
+                action = QAction(schema.name, self)
+                # Capture schema in lambda default arg to avoid loop variable closure issue
+                action.triggered.connect(lambda checked, s=schema: self._apply_schema_to_person(person, s))
+                apply_schema_menu.addAction(action)
+        
         menu.addSeparator()
         
         # Clear current month action
@@ -155,6 +165,44 @@ class ColoredVerticalHeader(QHeaderView):
         menu.addAction(clear_future_action)
         
         menu.exec_(pos)
+
+    def _apply_schema_to_person(self, person, schema):
+        """Apply a schema to a person starting from current month."""
+        from models import SchemaAssignment
+        
+        year = int(self.main_window.year_combo.currentText())
+        month = self.main_window.month_combo.currentIndex() + 1
+        
+        # 1. Get current assignments for undo
+        current_assignments = [sa for sa in self.main_window.controller.schema_assignments if sa.person_id == person.id]
+        old_assignments_state = [sa.to_dict() for sa in current_assignments]
+        
+        # 2. Create new assignment
+        new_assignment = SchemaAssignment(
+            person_id=person.id,
+            schema_id=schema.id,
+            repeat_mode="always", # Default to always?
+            start_year=year,
+            start_month=month,
+            overwrite_existing=True
+        )
+        
+        # 3. Create new state (append)
+        self.main_window.controller.schema_assignments.append(new_assignment)
+        
+        # Capture new state for this person (all their assignments)
+        new_assignments_list = current_assignments + [new_assignment]
+        new_assignments_state = [sa.to_dict() for sa in new_assignments_list]
+        
+        # 4. Record Undo
+        self.main_window.controller.undo_manager.record_schema_assignment_change(
+            f"Assign schema '{schema.name}' to {person.display_name}",
+            old_assignments_state,
+            new_assignments_state
+        )
+        
+        # 5. Apply the schema immediately for the current month (and trigger refresh)
+        self.main_window.finalize_table_setup()
 
     def _clear_person_schedule_month(self, person):
         from PyQt5.QtWidgets import QMessageBox
