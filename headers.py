@@ -114,7 +114,96 @@ class ColoredVerticalHeader(QHeaderView):
                 self.main_window._row_dragging = True
                 self.main_window._row_drag_source = index
                 self.main_window._row_drag_target = index
+        elif event.button() == Qt.RightButton:
+            # Right-click context menu
+            index = self.logicalIndexAt(event.pos())
+            if index >= 0 and index < len(self.main_window.rows):
+                row_data = self.main_window.rows[index]
+                if row_data["type"] == "section":
+                    self._show_section_context_menu(event.globalPos(), row_data)
         super().mousePressEvent(event)
+    
+    def _show_section_context_menu(self, pos, section_data):
+        """Show context menu for section header."""
+        from PyQt5.QtWidgets import QAction, QInputDialog, QMessageBox
+        
+        menu = QMenu(self)
+        
+        # Get section object
+        section_id = section_data.get("section_id") or section_data.get("id")
+        section = self.main_window.controller.get_section_by_id(section_id)
+        
+        if not section:
+            return
+        
+        # Sort alphabetically action
+        sort_action = QAction("🔤 Sort Alphabetically (by Nom)", self)
+        sort_action.triggered.connect(lambda: self._sort_section(section))
+        menu.addAction(sort_action)
+        
+        menu.addSeparator()
+        
+        # Rename section action
+        rename_action = QAction("✏️ Rename Section", self)
+        rename_action.triggered.connect(lambda: self._rename_section(section))
+        menu.addAction(rename_action)
+        
+        menu.addSeparator()
+        
+        # Manage sections action
+        manage_action = QAction("⚙️ Manage All Sections...", self)
+        manage_action.triggered.connect(self.main_window.open_sections_dialog)
+        menu.addAction(manage_action)
+        
+        menu.exec_(pos)
+    
+    def _sort_section(self, section):
+        """Sort people in section alphabetically."""
+        from PyQt5.QtWidgets import QMessageBox
+        
+        people_count = len(section.people_ids)
+        if people_count == 0:
+            QMessageBox.information(
+                self.main_window,
+                "No People",
+                f"Section '{section.label}' has no people to sort."
+            )
+            return
+        
+        reply = QMessageBox.question(
+            self.main_window,
+            "Sort Section",
+            f"Sort {people_count} people in '{section.label}' alphabetically by last name (Nom)?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.main_window.controller.sort_section_alphabetically(section.id)
+            self.main_window.rebuild_rows_from_sections()
+            self.main_window.finalize_table_setup()
+            
+            if self.main_window.preferences.auto_save:
+                self.main_window.quick_save()
+    
+    def _rename_section(self, section):
+        """Rename a section."""
+        from PyQt5.QtWidgets import QInputDialog
+        
+        new_label, ok = QInputDialog.getText(
+            self.main_window,
+            "Rename Section",
+            "New section name:",
+            text=section.label
+        )
+        
+        if ok and new_label.strip():
+            section.label = new_label.strip()
+            self.main_window.rebuild_rows_from_sections()
+            self.main_window.finalize_table_setup()
+            
+            if self.main_window.preferences.auto_save:
+                self.main_window.quick_save()
 
     def mouseMoveEvent(self, event):
         # 1. Handle Stats Tooltips

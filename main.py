@@ -6,6 +6,7 @@
 import os
 import sys
 import calendar
+import json
 
 # Qt
 from PyQt5.QtWidgets import (
@@ -49,8 +50,19 @@ from ui_setup import setup_main_window_ui
 from drag_drop_handler import DragDropHandler
 from copy_paste_handler import CopyPasteHandler
 from dev_seed import load_dev_data
+from migration import rebuild_rows_from_sections
 
-VERSION = "1.0.5"
+VERSION = "1.0.7"
+
+# ============================================================
+# Constants
+# ============================================================
+FILE_WATCH_INTERVAL_MS = 5000  # Check for external file changes every 5 seconds
+UPDATE_CHECK_DELAY_MS = 2000   # Delay before checking for updates on startup
+FILE_MTIME_TOLERANCE_S = 0.1   # Tolerance for file modification time comparison
+MAX_RECENT_FILES = 3           # Maximum number of recent files to track
+MAX_BACKUP_FILES = 5           # Maximum number of backup files to keep
+
 
 # ============================================================
 # 2. Main Window
@@ -104,7 +116,7 @@ class MainWindow(QMainWindow):
         self.current_file_path = None
         self.last_file_mtime = 0
         self._watcher_timer = QTimer(self)
-        self._watcher_timer.setInterval(5000) # Check every 5 seconds
+        self._watcher_timer.setInterval(FILE_WATCH_INTERVAL_MS)
         self._watcher_timer.timeout.connect(self._check_file_for_updates)
 
         # =====================================================
@@ -124,7 +136,7 @@ class MainWindow(QMainWindow):
         # =====================================================
         self.updater = UpdateManager(VERSION, self)
         # Check for updates silently after 2 seconds to not block startup
-        QTimer.singleShot(2000, lambda: self.updater.start_check(silent=True))
+        QTimer.singleShot(UPDATE_CHECK_DELAY_MS, lambda: self.updater.start_check(silent=True))
 
         # =====================================================
         # 8. LOAD APP STATE OR FALL BACK TO DEFAULTS
@@ -148,9 +160,9 @@ class MainWindow(QMainWindow):
             self._populate_initial_rows()
 
             # =====================================================
-            # DEV SEED DATA - Set to False for production
+            # DEV SEED DATA - Controlled by environment variable
             # =====================================================
-            DEV_MODE = True  # ✅ Change to False for production
+            DEV_MODE = os.getenv("MSHIFT_DEV_MODE", "").lower() in ("1", "true", "yes")
             
             if DEV_MODE:
                 load_dev_data(self)
@@ -163,6 +175,7 @@ class MainWindow(QMainWindow):
             if os.path.exists(last_file):
                 print(f"Auto-loading last file: {last_file}")
                 load_schedule(self.controller, last_file)
+                self.rebuild_rows_from_sections()  # Rebuild rows from loaded sections
                 self.current_file_path = last_file
                 self.last_file_mtime = os.path.getmtime(last_file)
 
@@ -212,6 +225,18 @@ class MainWindow(QMainWindow):
     def recent_files(self): return self.controller.recent_files
     @recent_files.setter
     def recent_files(self, v): self.controller.recent_files = v
+
+    # =====================================================
+    # 3b. SECTION MANAGEMENT
+    # =====================================================
+    def rebuild_rows_from_sections(self):
+        """
+        Rebuild the rows structure from sections.
+        
+        This is called after sections are modified to update the UI.
+        Rows are used by the vertical header to display sections and people.
+        """
+        self.controller.rows = rebuild_rows_from_sections(self.controller.sections)
 
     # =====================================================
     # 4. APP LIFECYCLE & PERSISTENCE
@@ -539,9 +564,18 @@ class MainWindow(QMainWindow):
 
     def _open_add_person(self, event):
         print("Add Person clicked")
-        dialog = AddPersonDialog()
+        dialog = AddPersonDialog(sections=self.controller.sections)
         if dialog.exec():
-           self._add_person_to_table(dialog.person)
+            person = dialog.person
+            self._add_person_to_table(person)
+            
+            # Add person to their section
+            if person.section_id:
+                section = self.controller.get_section_by_id(person.section_id)
+                if section:
+                    section.add_person(person.id)
+                    self.rebuild_rows_from_sections()
+                    self.finalize_table_setup()
 
     def _open_add_service(self, event):
         print("Add Service clicked")
@@ -634,6 +668,23 @@ class MainWindow(QMainWindow):
             # Save app state after schema changes
             self.app_state.save_app_state(self.controller.to_dict())
     
+    def open_sections_dialog(self):
+        """Open the dialog to manage sections."""
+        from section_dialogs import ManageSectionsDialog
+        
+        dialog = ManageSectionsDialog(self.controller, self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            # Rebuild rows from updated sections
+            self.rebuild_rows_from_sections()
+            self.finalize_table_setup()
+            
+            # Save app state after section changes
+            self.app_state.save_app_state(self.controller.to_dict())
+            
+            if self.preferences.auto_save:
+                self.quick_save()
+    
     def open_assign_schema_dialog(self):
         """Open the dialog to assign a schema to people."""
         dialog = AssignSchemaDialog(self.controller.schemas, self.people, self)
@@ -678,9 +729,25 @@ class MainWindow(QMainWindow):
         if self.current_file_path:
             self._is_saving_to_disk = True
             try:
+                # Set expected mtime BEFORE saving to prevent race condition
+                # The file watcher checks if mtime > last_file_mtime, so we set it
+                # to current time to prevent false positives
+                import time
+                expected_mtime = time.time()
+                self.last_file_mtime = expected_mtime
+                
                 save_schedule(self.controller, self.current_file_path)
-                # Wait a tiny bit for the OS to finalize the write
+                
+                # Update with actual mtime after save
                 self.last_file_mtime = os.path.getmtime(self.current_file_path)
+            except Exception as e:
+                print(f"Error saving file: {e}")
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.critical(
+                    self,
+                    "Save Error",
+                    f"Failed to save file:\n{e}"
+                )
             finally:
                 self._is_saving_to_disk = False
         else:
@@ -711,9 +778,21 @@ class MainWindow(QMainWindow):
             return
         self._is_saving_to_disk = True
         try:
+            import time
+            expected_mtime = time.time()
+            self.last_file_mtime = expected_mtime
+            
             save_schedule(self.controller, path)
             self.current_file_path = os.path.abspath(path)
             self.last_file_mtime = os.path.getmtime(path)
+        except Exception as e:
+            print(f"Error saving file: {e}")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self,
+                "Save Error",
+                f"Failed to save file:\n{e}"
+            )
         finally:
             self._is_saving_to_disk = False
         self._add_to_recent_files(path)
@@ -727,15 +806,48 @@ class MainWindow(QMainWindow):
         self.load_recent_file(path)
 
     def load_recent_file(self, path):
-        load_schedule(self.controller, path)
-        self.current_file_path = os.path.abspath(path)
-        self.last_file_mtime = os.path.getmtime(path)
-        self._add_to_recent_files(path)
+        try:
+            load_schedule(self.controller, path)
+            self.rebuild_rows_from_sections()  # Rebuild rows from loaded sections
+            self.current_file_path = os.path.abspath(path)
+            self.last_file_mtime = os.path.getmtime(path)
+            self._add_to_recent_files(path)
 
-        # UI refresh
-        self.table_clear()
-        self.finalize_table_setup()
-        self._watcher_timer.start()
+            # UI refresh
+            self.table_clear()
+            self.finalize_table_setup()
+            self._watcher_timer.start()
+        except FileNotFoundError:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self,
+                "File Not Found",
+                f"The file could not be found:\\n{path}"
+            )
+        except json.JSONDecodeError as e:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self,
+                "Invalid File Format",
+                f"The file is not a valid MShift file or is corrupted:\\n{e}"
+            )
+        except Exception as e:
+            from PyQt5.QtWidgets import QMessageBox
+            # Check if it's a ValidationError
+            error_type = type(e).__name__
+            if error_type == "ValidationError":
+                QMessageBox.critical(
+                    self,
+                    "Data Validation Error",
+                    f"The file contains invalid data:\\n{e}\\n\\nThe file may be corrupted or from an incompatible version."
+                )
+            else:
+                QMessageBox.critical(
+                    self,
+                    "Load Error",
+                    f"Failed to load file:\\n{e}"
+                )
+            print(f"Error loading file: {e}")
 
     def _check_file_for_updates(self):
         if self._is_saving_to_disk:
@@ -746,8 +858,8 @@ class MainWindow(QMainWindow):
 
         try:
             mtime = os.path.getmtime(self.current_file_path)
-            # Add a small tolerance (0.1s) to avoid sub-second timestamp jitter
-            if mtime > self.last_file_mtime + 0.1:
+            # Add a small tolerance to avoid sub-second timestamp jitter
+            if mtime > self.last_file_mtime + FILE_MTIME_TOLERANCE_S:
                 # File updated externally!
                 self.last_file_mtime = mtime # Prevent multiple prompts
                 
@@ -774,14 +886,105 @@ class MainWindow(QMainWindow):
             
         self.recent_files.insert(0, path)
         
-        # Limit to 3
-        self.recent_files = self.recent_files[:3]
+        # Limit to MAX_RECENT_FILES
+        self.recent_files = self.recent_files[:MAX_RECENT_FILES]
         
         # Update UI
         self.menu_bar.update_recent_menu(self.recent_files)
         
         # Persist
         self.app_state.save_app_state(self.controller.to_dict())
+    
+    def restore_from_backup(self):
+        """Show dialog to restore from a backup file."""
+        if not self.current_file_path:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "No File Open",
+                "Please open a file first before restoring from backup."
+            )
+            return
+        
+        from backup_manager import get_backup_list, restore_from_backup
+        
+        # Get list of available backups
+        backups = get_backup_list(self.current_file_path)
+        
+        if not backups:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "No Backups Found",
+                "No backup files were found for the current file."
+            )
+            return
+        
+        # Create a dialog to select backup
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QListWidget, QPushButton, QHBoxLayout, QLabel
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Restore from Backup")
+        dialog.setMinimumWidth(500)
+        
+        layout = QVBoxLayout(dialog)
+        
+        label = QLabel("Select a backup to restore:")
+        layout.addWidget(label)
+        
+        list_widget = QListWidget()
+        for backup_path, backup_time in backups:
+            item_text = backup_time.strftime("%Y-%m-%d %H:%M:%S")
+            list_widget.addItem(item_text)
+        list_widget.setCurrentRow(0)  # Select most recent by default
+        layout.addWidget(list_widget)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        restore_button = QPushButton("Restore")
+        cancel_button = QPushButton("Cancel")
+        button_layout.addStretch()
+        button_layout.addWidget(restore_button)
+        button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
+        
+        def on_restore():
+            selected_row = list_widget.currentRow()
+            if selected_row >= 0:
+                backup_path, backup_time = backups[selected_row]
+                
+                # Confirm restoration
+                from PyQt5.QtWidgets import QMessageBox
+                reply = QMessageBox.question(
+                    dialog,
+                    "Confirm Restore",
+                    f"Are you sure you want to restore from backup dated {backup_time.strftime('%Y-%m-%d %H:%M:%S')}?\n\n"
+                    "The current file will be backed up before restoration.",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                
+                if reply == QMessageBox.Yes:
+                    if restore_from_backup(backup_path, self.current_file_path):
+                        QMessageBox.information(
+                            dialog,
+                            "Restore Successful",
+                            "The backup has been restored successfully."
+                        )
+                        dialog.accept()
+                        # Reload the file
+                        self.load_recent_file(self.current_file_path)
+                    else:
+                        QMessageBox.critical(
+                            dialog,
+                            "Restore Failed",
+                            "Failed to restore from backup. Please check the console for errors."
+                        )
+        
+        restore_button.clicked.connect(on_restore)
+        cancel_button.clicked.connect(dialog.reject)
+        
+        dialog.exec_()
+
 
     # =====================================================
     # 13. DOMAIN RESOLUTION HELPERS

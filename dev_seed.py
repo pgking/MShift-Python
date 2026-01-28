@@ -5,7 +5,7 @@ This module provides sample data for development and testing.
 Import and use load_dev_data() to populate the app with test data.
 """
 
-from models import Person, Service
+from models import Person, Service, Section
 
 
 def load_dev_data(main_window):
@@ -13,7 +13,8 @@ def load_dev_data(main_window):
     Load development seed data into MainWindow.
     
     This adds:
-    - 5 test people with varying percentages
+    - 2 test sections (PMSI, Suites)
+    - 6 test people with varying percentages
     - Already configured services (Jour, Nuit, Planning Familial)
     
     Usage:
@@ -21,20 +22,35 @@ def load_dev_data(main_window):
             from dev_seed import load_dev_data
             load_dev_data(self)
     """
+    # Create test sections
+    pmsi_section = Section("PMSI", "PMSI")
+    suites_section = Section("Suites", "Suites de couches")
+    
     # Add test people with different work percentages
     test_people = [
-        Person("Tiphaine", "Angibaud", 100),
-        Person("Marie", "Dubois", 80),
-        Person("Sophie", "Martin", 100),
-        Person("Claire", "Bernard", 50),
-        Person("Julie", "Petit", 100),
-        Person("Emma", "Rousseau", 80),
+        Person("Tiphaine", "Angibaud", 100, section_id="PMSI"),
+        Person("Marie", "Dubois", 80, section_id="PMSI"),
+        Person("Sophie", "Martin", 100, section_id="PMSI"),
+        Person("Claire", "Bernard", 50, section_id="Suites"),
+        Person("Julie", "Petit", 100, section_id="Suites"),
+        Person("Emma", "Rousseau", 80, section_id="Suites"),
     ]
     
+    # Add people to sections
     for person in test_people:
+        if person.section_id == "PMSI":
+            pmsi_section.add_person(person.id)
+        elif person.section_id == "Suites":
+            suites_section.add_person(person.id)
         main_window._add_person_to_table(person)
     
-    print(f"✅ Dev seed loaded: {len(test_people)} people added")
+    # Add sections to controller
+    main_window.controller.sections = [pmsi_section, suites_section]
+    
+    # Rebuild rows from sections
+    main_window.rebuild_rows_from_sections()
+    
+    print(f"✅ Dev seed loaded: {len(test_people)} people in {len(main_window.controller.sections)} sections")
 
 
 def load_dev_schedule_sample(main_window, year: int, month: int):

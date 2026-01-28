@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional, Tuple
 import calendar
-from models import MonthData, Person, Service, Schema, SchemaAssignment
+from models import MonthData, Person, Service, Schema, SchemaAssignment, Section
 from rules import evaluate_rules, DayServiceViolation, Rule, DEFAULT_RULES
 from preferences import Preferences
 
@@ -16,6 +16,7 @@ class ScheduleController:
         self.services: List[Service] = []
         self.schemas: List[Schema] = []
         self.schema_assignments: List[SchemaAssignment] = []
+        self.sections: List[Section] = []  # Hierarchical sections containing people
         self.preferences: Preferences = Preferences()
         self.rules: List[Rule] = DEFAULT_RULES
         
@@ -44,6 +45,7 @@ class ScheduleController:
             "services": [s.to_dict() for s in self.services],
             "schemas": [s.to_dict() for s in self.schemas],
             "schema_assignments": [sa.to_dict() for sa in self.schema_assignments],
+            "sections": [s.to_dict() for s in self.sections],
             "rows": self.rows,
             "last_year": self.last_year,
             "last_month": self.last_month,
@@ -86,6 +88,9 @@ class ScheduleController:
         
         self.schemas = [Schema.from_dict(s) for s in data.get("schemas", [])]
         self.schema_assignments = [SchemaAssignment.from_dict(sa) for sa in data.get("schema_assignments", [])]
+        
+        # Load sections (with migration support)
+        self.sections = [Section.from_dict(s) for s in data.get("sections", [])]
         
         self.rows = data.get("rows", [])
         self.last_month = data.get("last_month")
@@ -146,6 +151,90 @@ class ScheduleController:
     def get_assignments_for_person(self, person_id: str) -> List[SchemaAssignment]:
         """Get all schema assignments for a specific person."""
         return [sa for sa in self.schema_assignments if sa.person_id == person_id]
+    
+    # ============================================================
+    # Section Management Methods
+    # ============================================================
+    
+    def get_section_by_id(self, section_id: str) -> Optional[Section]:
+        """Get section by ID."""
+        return next((s for s in self.sections if s.id == section_id), None)
+    
+    def get_people_in_section(self, section_id: str) -> List[Person]:
+        """Get all people in a section, in order."""
+        section = self.get_section_by_id(section_id)
+        if not section:
+            return []
+        
+        # Return people in the order specified by section.people_ids
+        people = []
+        for person_id in section.people_ids:
+            person = self.get_person_by_id(person_id)
+            if person:
+                people.append(person)
+        return people
+    
+    def move_person_to_section(self, person_id: str, new_section_id: str, index: int = None):
+        """
+        Move a person to a different section.
+        
+        Args:
+            person_id: ID of the person to move
+            new_section_id: ID of the target section
+            index: Position in the new section (None = append to end)
+        """
+        person = self.get_person_by_id(person_id)
+        if not person:
+            return
+        
+        # Remove from old section
+        if person.section_id:
+            old_section = self.get_section_by_id(person.section_id)
+            if old_section:
+                old_section.remove_person(person_id)
+        
+        # Add to new section
+        new_section = self.get_section_by_id(new_section_id)
+        if new_section:
+            new_section.add_person(person_id, index)
+            person.section_id = new_section_id
+    
+    def reorder_person_in_section(self, person_id: str, new_index: int):
+        """
+        Reorder a person within their current section.
+        
+        Args:
+            person_id: ID of the person to reorder
+            new_index: New position within the section
+        """
+        person = self.get_person_by_id(person_id)
+        if not person or not person.section_id:
+            return
+        
+        section = self.get_section_by_id(person.section_id)
+        if section:
+            section.reorder_person(person_id, new_index)
+    
+    def sort_section_alphabetically(self, section_id: str):
+        """
+        Sort people in a section alphabetically by display name.
+        
+        Args:
+            section_id: ID of the section to sort
+        """
+        section = self.get_section_by_id(section_id)
+        if not section:
+            return
+        
+        # Create dict of people for sorting
+        people_dict = {p.id: p for p in self.people}
+        section.sort_people_alphabetically(people_dict)
+    
+    def sort_all_sections_alphabetically(self):
+        """Sort people in all sections alphabetically."""
+        people_dict = {p.id: p for p in self.people}
+        for section in self.sections:
+            section.sort_people_alphabetically(people_dict)
     
 
     

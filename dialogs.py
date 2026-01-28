@@ -27,10 +27,12 @@ from models import Person, Service, Schema
 from preferences import Preferences
 
 class AddPersonDialog(QDialog):
-    def __init__(self):
+    def __init__(self, sections=None):
         super().__init__()
         self.setWindowTitle("Add Person")
-        self.setFixedSize(300, 220)
+        self.setFixedSize(300, 260)
+        
+        self.sections = sections or []
 
         layout = QFormLayout(self)
 
@@ -49,11 +51,21 @@ class AddPersonDialog(QDialog):
         self.percent_spin.setRange(0, 100)
         self.percent_spin.setValue(100)
         self.percent_spin.setSingleStep(5)
+        
+        # Section selector
+        self.section_combo = QComboBox()
+        if self.sections:
+            for section in self.sections:
+                self.section_combo.addItem(section.label, section.id)
+        else:
+            self.section_combo.addItem("No sections available", None)
+            self.section_combo.setEnabled(False)
 
         layout.addRow("Nom : ", self.nom_edit)
         layout.addRow("Prénom : ", self.prenom_edit)
         layout.addRow("Affiché :", self.short_preview)
         layout.addRow("Pourcentage : ", self.percent_spin)
+        layout.addRow("Section : ", self.section_combo)
 
         buttons_layout = QHBoxLayout()
         self.create_btn = QPushButton("Créer")
@@ -87,11 +99,15 @@ class AddPersonDialog(QDialog):
     def _on_create(self):
         if not self.nom_edit.text() or not self.prenom_edit.text():
             return #Warning popup later
+        
+        # Get selected section ID
+        section_id = self.section_combo.currentData() if self.sections else None
 
         self.person = Person(
             prenom = f"{self.prenom_edit.text()}",
             nom = f"{self.nom_edit.text()}",
-            percentage = self.percent_spin.value()
+            percentage = self.percent_spin.value(),
+            section_id = section_id
         )
 
         self.accept()

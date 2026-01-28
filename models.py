@@ -1,6 +1,105 @@
 import uuid
 import calendar
 
+class Section:
+    """
+    Represents a section that contains people.
+    
+    Sections are hierarchical containers that group people together.
+    Each section maintains an ordered list of person IDs.
+    
+    Attributes:
+        id: Unique identifier for the section
+        label: Display name for the section
+        people_ids: Ordered list of person IDs in this section
+        is_collapsed: Whether the section is collapsed in the UI (future feature)
+    """
+    def __init__(self, id: str, label: str, people_ids: list[str] = None, is_collapsed: bool = False):
+        self.id = id
+        self.label = label
+        self.people_ids = people_ids if people_ids is not None else []
+        self.is_collapsed = is_collapsed
+    
+    def add_person(self, person_id: str, index: int = None):
+        """
+        Add a person to this section.
+        
+        Args:
+            person_id: ID of the person to add
+            index: Position to insert at (None = append to end)
+        """
+        if person_id in self.people_ids:
+            # Person already in section, remove from old position
+            self.people_ids.remove(person_id)
+        
+        if index is None:
+            self.people_ids.append(person_id)
+        else:
+            self.people_ids.insert(index, person_id)
+    
+    def remove_person(self, person_id: str) -> bool:
+        """
+        Remove a person from this section.
+        
+        Args:
+            person_id: ID of the person to remove
+            
+        Returns:
+            True if person was removed, False if not found
+        """
+        if person_id in self.people_ids:
+            self.people_ids.remove(person_id)
+            return True
+        return False
+    
+    def reorder_person(self, person_id: str, new_index: int):
+        """
+        Move a person to a new position within this section.
+        
+        Args:
+            person_id: ID of the person to move
+            new_index: New position for the person
+        """
+        if person_id in self.people_ids:
+            self.people_ids.remove(person_id)
+            self.people_ids.insert(new_index, person_id)
+    
+    def sort_people_alphabetically(self, people_dict: dict):
+        """
+        Sort people in this section alphabetically by last name (nom).
+        
+        Args:
+            people_dict: Dictionary mapping person_id to Person object
+        """
+        # Get Person objects for people in this section
+        people_in_section = [people_dict[pid] for pid in self.people_ids if pid in people_dict]
+        
+        # Sort by nom (last name), case-insensitive
+        people_in_section.sort(key=lambda p: p.nom.lower())
+        
+        # Update people_ids with sorted order
+        self.people_ids = [p.id for p in people_in_section]
+    
+    def to_dict(self):
+        """Serialize section to dictionary."""
+        return {
+            "id": self.id,
+            "label": self.label,
+            "people_ids": self.people_ids,
+            "is_collapsed": self.is_collapsed
+        }
+    
+    @staticmethod
+    def from_dict(data: dict):
+        """Deserialize section from dictionary."""
+        return Section(
+            id=data["id"],
+            label=data["label"],
+            people_ids=data.get("people_ids", []),
+            is_collapsed=data.get("is_collapsed", False)
+        )
+
+
 class Service:
     def __init__(self, name, short_name, hours, color_hex, id=None, is_visible=True):
         self.id = id or str(uuid.uuid4()) # Unique identifier
@@ -38,11 +137,12 @@ class Service:
         }
 
 class Person:
-    def __init__(self, prenom: str, nom: str, percentage: int, short_name: str | None = None, id=None):
+    def __init__(self, prenom: str, nom: str, percentage: int, short_name: str | None = None, id=None, section_id: str | None = None):
         self.id = id or str(uuid.uuid4()) # Unique identifier
         self.prenom = prenom.strip()
         self.nom = nom.strip()
         self.percentage = percentage
+        self.section_id = section_id  # Which section this person belongs to
         if short_name and short_name.strip() :
             self.short_name = short_name.strip()
         
@@ -75,8 +175,10 @@ class Person:
             "prenom": self.prenom,
             "nom": self.nom,
             "percentage": self.percentage,
-            "short_name": self.short_name
+            "short_name": self.short_name,
+            "section_id": self.section_id
         }
+
 
 class Schema:
     """

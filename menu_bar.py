@@ -35,6 +35,9 @@ class MenuBar(QMenuBar):
 
         self.recent_menu = QMenu("Load Recent", self)
         # Filled dynamically later
+        
+        restore_backup_action = QAction("Restore from Backup...", self)
+        restore_backup_action.triggered.connect(self.parent.restore_from_backup)
 
         import_menu = QMenu("Import", self)
         import_menu.addAction("From Excel...", self.parent.import_excel)
@@ -53,6 +56,7 @@ class MenuBar(QMenuBar):
         file_menu.addSeparator()
         file_menu.addAction(load_action)
         file_menu.addMenu(self.recent_menu)
+        file_menu.addAction(restore_backup_action)
         file_menu.addSeparator()
         file_menu.addMenu(import_menu)
         file_menu.addMenu(export_menu)
@@ -71,9 +75,15 @@ class MenuBar(QMenuBar):
         manage_schemas_action.triggered.connect(
             self.parent.open_schemas_dialog
         )
+        
+        manage_sections_action = QAction("Sections", self)
+        manage_sections_action.triggered.connect(
+            self.parent.open_sections_dialog
+        )
 
         manage_menu.addAction(manage_services_action)
         manage_menu.addAction(manage_schemas_action)
+        manage_menu.addAction(manage_sections_action)
 
     def _create_about_menu(self):
         about_menu = self.addMenu("About")
