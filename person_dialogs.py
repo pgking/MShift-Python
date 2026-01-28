@@ -59,7 +59,6 @@ class ManagePeopleDialog(QDialog):
         
         self.nom_edit = QLineEdit()
         self.prenom_edit = QLineEdit()
-        self.short_edit = QLineEdit()
         self.percent_spin = QSpinBox()
         self.percent_spin.setRange(0, 100)
         self.percent_spin.setSingleStep(5)
@@ -70,14 +69,12 @@ class ManagePeopleDialog(QDialog):
         
         right_layout.addRow("Last Name (Nom):", self.nom_edit)
         right_layout.addRow("First Name (Prénom):", self.prenom_edit)
-        right_layout.addRow("Display Name (Short):", self.short_edit)
         right_layout.addRow("Percentage:", self.percent_spin)
         right_layout.addRow("Section:", self.section_combo)
         
         # Connect signals
         self.nom_edit.editingFinished.connect(self._on_field_changed)
         self.prenom_edit.editingFinished.connect(self._on_field_changed)
-        self.short_edit.editingFinished.connect(self._on_field_changed)
         self.percent_spin.editingFinished.connect(self._on_field_changed)
         self.section_combo.currentIndexChanged.connect(self._on_field_changed)
         
@@ -136,7 +133,6 @@ class ManagePeopleDialog(QDialog):
     def _disable_fields(self, disable):
         self.nom_edit.setEnabled(not disable)
         self.prenom_edit.setEnabled(not disable)
-        self.short_edit.setEnabled(not disable)
         self.percent_spin.setEnabled(not disable)
         self.section_combo.setEnabled(not disable)
         self.delete_btn.setEnabled(not disable)
@@ -148,7 +144,6 @@ class ManagePeopleDialog(QDialog):
         self._is_updating = True
         self.nom_edit.clear()
         self.prenom_edit.clear()
-        self.short_edit.clear()
         self.percent_spin.setValue(100)
         self.section_combo.setCurrentIndex(0)
         self._is_updating = False
@@ -161,7 +156,6 @@ class ManagePeopleDialog(QDialog):
         p = self.current_person
         self.nom_edit.setText(p.nom)
         self.prenom_edit.setText(p.prenom)
-        self.short_edit.setText(p.short_name)
         self.percent_spin.setValue(p.percentage)
         
         # Find section index
@@ -183,7 +177,6 @@ class ManagePeopleDialog(QDialog):
         # Apply changes
         new_nom = self.nom_edit.text().strip()
         new_prenom = self.prenom_edit.text().strip()
-        new_short = self.short_edit.text().strip()
         new_percent = self.percent_spin.value()
         new_section_id = self.section_combo.currentData()
         
@@ -193,10 +186,6 @@ class ManagePeopleDialog(QDialog):
         # Update object
         self.current_person.nom = new_nom
         self.current_person.prenom = new_prenom
-        # Auto-update short name logic if empty?
-        # If user explicitly set short name to empty string, it might regen.
-        # But if they want to clear it, they can.
-        self.current_person.short_name = new_short
         self.current_person.percentage = new_percent
         
         # Handle Section Change logic (update section objects)
