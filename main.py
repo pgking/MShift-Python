@@ -36,6 +36,7 @@ from PyQt5.QtGui import (
 # App modules
 from models import Person, Service, MonthData, Schema, SchemaAssignment
 from dialogs import AddPersonDialog, AddServiceDialog, ManageServicesDialog, PreferencesDialog
+from person_dialogs import ManagePeopleDialog
 from schema_dialogs import CreateSchemaDialog, ManageSchemasDialog
 from menu_bar import MenuBar
 from exporter import export_to_excel
@@ -478,6 +479,44 @@ class MainWindow(QMainWindow):
             self.controller.last_year = int(self.year_combo.currentText())
             self.controller.last_month = self.month_combo.currentIndex() + 1
             self.app_state.save_app_state(self.controller.to_dict())
+
+    def open_people_dialog(self, initial_person_id=None):
+        """Open the Manage People dialog."""
+        dialog = ManagePeopleDialog(self)
+        if initial_person_id:
+            dialog.select_person(initial_person_id)
+        dialog.exec_()
+        # Refresh UI after closing, in case of changes not fully handled dynamically
+        self.rebuild_rows_from_sections()
+        self.finalize_table_setup()
+        
+    def open_add_person_dialog(self):
+        """Open the Add Person dialog."""
+        dialog = AddPersonDialog(self.controller.sections)
+        if dialog.exec_() == QDialog.Accepted:
+            # Create Person
+            p = Person(
+                prenom=dialog.prenom_edit.text(),
+                nom=dialog.nom_edit.text(),
+                percentage=dialog.percent_spin.value(),
+                short_name=dialog.short_preview.text(),
+                section_id=dialog.section_combo.currentData()
+            )
+            
+            # Undo support
+            self.controller.undo_manager.record_person_add(p.to_dict())
+            
+            self.controller.people.append(p)
+            
+            # Add to section
+            if p.section_id:
+                section = self.controller.get_section_by_id(p.section_id)
+                if section:
+                    section.add_person(p.id)
+            
+            self.rebuild_rows_from_sections()
+            self.finalize_table_setup()
+            self.menu_bar.update_undo_redo_actions()
 
     def closeEvent(self, event):
         self.controller.last_year = int(self.year_combo.currentText())

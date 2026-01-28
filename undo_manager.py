@@ -212,6 +212,23 @@ class ScheduleUndoManager(UndoManager):
         )
         self.push(action)
     
+    def record_person_update(self, person_id: str, old_data: dict, new_data: dict):
+        """
+        Record updating a person's details.
+        
+        Args:
+            person_id: ID of the person
+            old_data: Dictionary containing old person data
+            new_data: Dictionary containing new person data
+        """
+        action = UndoableAction(
+            name=f"Update person: {new_data.get('prenom')} {new_data.get('nom')}",
+            undo_data={"person_id": person_id, "data": old_data},
+            redo_data={"person_id": person_id, "data": new_data},
+            action_type="person_update"
+        )
+        self.push(action)
+    
     def record_section_sort(self, section_id: str, section_label: str, 
                            old_order: List[str], new_order: List[str]):
         """

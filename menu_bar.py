@@ -107,6 +107,11 @@ class MenuBar(QMenuBar):
     def _create_manage_menu(self):
         manage_menu = self.addMenu("Gérer...")
 
+        manage_people_action = QAction("Personnes", self)
+        manage_people_action.triggered.connect(
+            self.parent.open_people_dialog
+        )
+
         manage_services_action = QAction("Services", self)
         manage_services_action.triggered.connect(
             self.parent.open_services_dialog
@@ -122,6 +127,7 @@ class MenuBar(QMenuBar):
             self.parent.open_sections_dialog
         )
 
+        manage_menu.addAction(manage_people_action)
         manage_menu.addAction(manage_services_action)
         manage_menu.addAction(manage_schemas_action)
         manage_menu.addAction(manage_sections_action)

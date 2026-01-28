@@ -137,6 +137,13 @@ class ColoredVerticalHeader(QHeaderView):
             
         menu = QMenu(self)
         
+        # Manage Person action
+        manage_action = QAction("Manage Person...", self)
+        manage_action.triggered.connect(lambda: self.main_window.open_people_dialog(person.id))
+        menu.addAction(manage_action)
+        
+        menu.addSeparator()
+        
         # Clear current month action
         clear_month_action = QAction("Clear Schedule (This Month)", self)
         clear_month_action.triggered.connect(lambda: self._clear_person_schedule_month(person))
