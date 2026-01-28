@@ -10,9 +10,50 @@ class MenuBar(QMenuBar):
         self.parent = parent  # MainWindow
 
         self._create_file_menu()
+        self._create_edit_menu()
         self._create_manage_menu()
         self._create_preferences_menu()
         self._create_about_menu()
+    
+    def _create_edit_menu(self):
+        edit_menu = self.addMenu("Edit")
+        
+        # Undo action
+        self.undo_action = QAction("Undo", self)
+        self.undo_action.setShortcut(QKeySequence.Undo)  # Ctrl+Z
+        self.undo_action.triggered.connect(self.parent.undo)
+        self.undo_action.setEnabled(False)
+        
+        # Redo action
+        self.redo_action = QAction("Redo", self)
+        self.redo_action.setShortcut(QKeySequence.Redo)  # Ctrl+Y or Ctrl+Shift+Z
+        self.redo_action.triggered.connect(self.parent.redo)
+        self.redo_action.setEnabled(False)
+        
+        edit_menu.addAction(self.undo_action)
+        edit_menu.addAction(self.redo_action)
+    
+    def update_undo_redo_actions(self):
+        """Update undo/redo menu items based on availability."""
+        undo_manager = self.parent.controller.undo_manager
+        
+        # Update undo action
+        can_undo = undo_manager.can_undo()
+        self.undo_action.setEnabled(can_undo)
+        if can_undo:
+            desc = undo_manager.get_undo_description()
+            self.undo_action.setText(f"Undo {desc}")
+        else:
+            self.undo_action.setText("Undo")
+        
+        # Update redo action
+        can_redo = undo_manager.can_redo()
+        self.redo_action.setEnabled(can_redo)
+        if can_redo:
+            desc = undo_manager.get_redo_description()
+            self.redo_action.setText(f"Redo {desc}")
+        else:
+            self.redo_action.setText("Redo")
 
     def _create_file_menu(self):
         file_menu = self.addMenu("File")

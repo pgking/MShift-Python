@@ -239,6 +239,216 @@ class MainWindow(QMainWindow):
         self.controller.rows = rebuild_rows_from_sections(self.controller.sections)
 
     # =====================================================
+    # 3c. UNDO/REDO SYSTEM
+    # =====================================================
+    def undo(self):
+        """Undo the last action."""
+        action = self.controller.undo_manager.undo()
+        if not action:
+            return
+        
+        # Disable undo recording while performing undo
+        self.controller.undo_manager.disable()
+        
+        try:
+            # Handle different action types
+            if action.action_type == "service_change":
+                self._undo_service_change(action.undo_data)
+            elif action.action_type == "person_add":
+                self._undo_person_add(action.undo_data)
+            elif action.action_type == "person_delete":
+                self._undo_person_delete(action.undo_data)
+            elif action.action_type == "section_sort":
+                self._undo_section_sort(action.undo_data)
+            elif action.action_type == "section_rename":
+                self._undo_section_rename(action.undo_data)
+            elif action.action_type == "person_move":
+                self._undo_person_move(action.undo_data)
+            elif action.action_type == "bulk_service_change":
+                self._undo_bulk_service_change(action.undo_data)
+            elif action.action_type == "schema_assignment_change":
+                self._undo_schema_assignment_change(action.undo_data)
+        finally:
+            # Re-enable undo recording
+            self.controller.undo_manager.enable()
+            # Update menu
+            self.menu_bar.update_undo_redo_actions()
+    
+    def redo(self):
+        """Redo the last undone action."""
+        action = self.controller.undo_manager.redo()
+        if not action:
+            return
+        
+        # Disable undo recording while performing redo
+        self.controller.undo_manager.disable()
+        
+        try:
+            # Handle different action types
+            if action.action_type == "service_change":
+                self._undo_service_change(action.redo_data)
+            elif action.action_type == "person_add":
+                self._undo_person_delete(action.redo_data)  # Redo add = undo delete
+            elif action.action_type == "person_delete":
+                self._undo_person_add(action.redo_data)  # Redo delete = undo add
+            elif action.action_type == "section_sort":
+                self._undo_section_sort(action.redo_data)
+            elif action.action_type == "section_rename":
+                self._undo_section_rename(action.redo_data)
+            elif action.action_type == "person_move":
+                self._undo_person_move(action.redo_data)
+            elif action.action_type == "bulk_service_change":
+                self._undo_bulk_service_change(action.redo_data)
+            elif action.action_type == "schema_assignment_change":
+                self._undo_schema_assignment_change(action.redo_data)
+        finally:
+            # Re-enable undo recording
+            self.controller.undo_manager.enable()
+            # Update menu
+            self.menu_bar.update_undo_redo_actions()
+    
+    def _undo_service_change(self, data):
+        """Undo a service assignment change."""
+        year = data["year"]
+        month = data["month"]
+        day = data["day"]
+        person_id = data["person_id"]
+        service_id = data["service_id"]
+        
+        # Apply the change
+        self.apply_assignment_change(
+            person_id=person_id,
+            day=day, 
+            service_id=service_id, 
+            year=year,
+            month=month,
+            reason="undo"
+        )
+    
+    def _undo_bulk_service_change(self, data):
+        """Undo a bulk service assignment change."""
+        changes = data["changes"]
+        for change in changes:
+            self._undo_service_change(change)
+            
+    def _undo_schema_assignment_change(self, data):
+        """Undo schema assignment changes."""
+        from models import SchemaAssignment
+        assignments_data = data["assignments"]
+        
+        # We need to replace the entire list of assignments?
+        # Or just merge?
+        # The easiest way is to re-load them.
+        # However, the controller holds ALL assignments for EVERYONE.
+        # We only want to touch those related to the person(s) involved?
+        # But our undo data format "assignments" could imply "all assignments for this person" 
+        # or "all assignments in system".
+        
+        # To be safe and simple: 
+        # 1. Identify which person(s) are affected (by looking at the data).
+        # 2. Remove all existing assignments for those persons.
+        # 3. Add back the assignments from data.
+        
+        if not assignments_data:
+            return
+
+        person_ids = set(a["person_id"] for a in assignments_data)
+        
+        # Filter out existing assignments for these people
+        self.controller.schema_assignments = [
+            sa for sa in self.controller.schema_assignments 
+            if sa.person_id not in person_ids
+        ]
+        
+        # Add back restored assignments
+        for adata in assignments_data:
+            sa = SchemaAssignment(
+                person_id=adata["person_id"],
+                schema_id=adata["schema_id"],
+                repeat_mode=adata["repeat_mode"],
+                repeat_months=adata["repeat_months"],
+                start_year=adata["start_year"],
+                start_month=adata["start_month"],
+                overwrite_existing=adata["overwrite_existing"]
+            )
+            self.controller.schema_assignments.append(sa)
+            
+        # Re-apply schemas immediately?
+        # Yes, if we are in a month that is affected, we might want to refresh.
+        # For simplicity, we can rely on finalize_table_setup() called by caller?
+        # But undo/redo usually needs to trigger UI refresh.
+        # Since this affects potentially many months, we should probably just refresh current view.
+        self.finalize_table_setup()
+    
+    def _undo_person_add(self, data):
+        """Undo adding a person (remove them)."""
+        person_id = data["person_id"]
+        person = self.controller.get_person_by_id(person_id)
+        if person:
+            self.controller.people.remove(person)
+            # Remove from section
+            if person.section_id:
+                section = self.controller.get_section_by_id(person.section_id)
+                if section:
+                    section.remove_person(person_id)
+            self.rebuild_rows_from_sections()
+            self.finalize_table_setup()
+    
+    def _undo_person_delete(self, data):
+        """Undo deleting a person (add them back)."""
+        person_data = data["person_data"]
+        person = Person(**person_data)
+        self.controller.people.append(person)
+        # Add to section
+        if person.section_id:
+            section = self.controller.get_section_by_id(person.section_id)
+            if section:
+                section.add_person(person.id)
+        self.rebuild_rows_from_sections()
+        self.finalize_table_setup()
+    
+    def _undo_section_sort(self, data):
+        """Undo section sorting."""
+        section_id = data["section_id"]
+        people_ids = data["people_ids"]
+        section = self.controller.get_section_by_id(section_id)
+        if section:
+            section.people_ids = people_ids.copy()
+            self.rebuild_rows_from_sections()
+            self.finalize_table_setup()
+    
+    def _undo_section_rename(self, data):
+        """Undo section rename."""
+        section_id = data["section_id"]
+        label = data["label"]
+        section = self.controller.get_section_by_id(section_id)
+        if section:
+            section.label = label
+            self.rebuild_rows_from_sections()
+            self.finalize_table_setup()
+    
+    def _undo_person_move(self, data):
+        """Undo moving a person between sections."""
+        person_id = data["person_id"]
+        section_id = data["section_id"]
+        index = data["index"]
+        
+        person = self.controller.get_person_by_id(person_id)
+        if person and person.section_id:
+            # Remove from current section
+            old_section = self.controller.get_section_by_id(person.section_id)
+            if old_section:
+                old_section.remove_person(person_id)
+        
+        # Add to target section
+        section = self.controller.get_section_by_id(section_id)
+        if section and person:
+            section.add_person(person_id, index)
+            person.section_id = section_id
+            self.rebuild_rows_from_sections()
+            self.finalize_table_setup()
+
+    # =====================================================
     # 4. APP LIFECYCLE & PERSISTENCE
     # =====================================================
     def load_app_state(self):
@@ -318,14 +528,187 @@ class MainWindow(QMainWindow):
 
             color = self.workload.status_color(summary.ratio)
             header.set_row_color(row_index, color)
+            
+            # Stats
+            stats = self.controller.calculate_stats_for_month(person.id, year, month)
+            header.set_person_stats(row_index, stats)
 
-            # Update Stats Circles
-            if hasattr(header, "set_person_stats"):
-                stats = self.controller.calculate_stats_for_month(person.id, year, month)
-                header.set_person_stats(row_index, stats)
+    # =====================================================
+    # 6. ASSIGNMENT LOGIC
+    # =====================================================
+    def clear_person_schedule_month(self, person_id, year, month):
+        """Clear all assignments for a person in a specific month."""
+        month_data = self.controller.get_month_data(year, month)
+        days_in_month = calendar.monthrange(year, month)[1]
+        
+        changes = []
+        for day in range(1, days_in_month + 1):
+            old_service = month_data.get_service(person_id, day)
+            if old_service is not None:
+                changes.append({
+                    "year": year,
+                    "month": month,
+                    "day": day,
+                    "person_id": person_id,
+                    "old_service_id": old_service,
+                    "new_service_id": None
+                })
+        
+        if not changes:
+            return
+            
+        # Record undo
+        person = self.controller.get_person_by_id(person_id)
+        name = person.display_name if person else "Person"
+        self.controller.undo_manager.record_bulk_service_change(
+            f"Clear {name}'s schedule for {month}/{year}",
+            changes
+        )
+        
+        # Apply changes
+        for change in changes:
+            self.apply_assignment_change(
+                person_id=change["person_id"],
+                day=change["day"],
+                service_id=None,
+                year=year,
+                month=month,
+                reason="bulk_clear"  # Prevent individual undo recording
+            )
+    
+    def clear_person_schedule_future(self, person_id, year, month):
+        """Clear assignments for this month and all future months."""
+        
+        # =========================================================
+        # PART 1: Modify Schema Assignments (Stop Future Automation)
+        # =========================================================
+        person = self.controller.get_person_by_id(person_id)
+        current_assignments = [sa for sa in self.controller.schema_assignments if sa.person_id == person_id]
+        
+        if current_assignments:
+            # Capture state BEFORE modification
+            old_assignments_state = [sa.to_dict() for sa in current_assignments]
+            assignments_changed = False
+            
+            # Identify assignments to keep (modified or untouched)
+            kept_assignments = []
+            
+            start_clearing_period = year * 12 + month
+            
+            for sa in current_assignments:
+                should_keep = True
+                
+                if sa.start_year is None or sa.start_month is None:
+                    # Invalid assignment, just keep it or ignore
+                    kept_assignments.append(sa)
+                    continue
 
-        # FORCE visual update of the vertical header
-        header.viewport().update()
+                start_period = sa.start_year * 12 + sa.start_month
+                
+                if start_period >= start_clearing_period:
+                    # Starts after clearing begins -> Delete it
+                    should_keep = False
+                    assignments_changed = True
+                else:
+                    # Started before. Check if it extends into clearing period.
+                    if sa.repeat_mode == "always":
+                        # It's infinite, so we must truncate it
+                        months_duration = start_clearing_period - start_period
+                        if months_duration > 0:
+                            sa.repeat_mode = "limited"
+                            sa.repeat_months = months_duration
+                            assignments_changed = True
+                        else:
+                            should_keep = False # Ends before it starts?
+                            assignments_changed = True
+                    else: # limited
+                        current_end_period = start_period + sa.repeat_months
+                        if current_end_period > start_clearing_period:
+                            # It overlaps, truncate it
+                            new_duration = start_clearing_period - start_period
+                            if new_duration > 0:
+                                sa.repeat_months = new_duration
+                                assignments_changed = True
+                            else:
+                                should_keep = False
+                                assignments_changed = True
+                
+                if should_keep:
+                    kept_assignments.append(sa)
+            
+            if assignments_changed:
+                # Update controller list
+                # Remove all old assignments for this person
+                self.controller.schema_assignments = [
+                    sa for sa in self.controller.schema_assignments 
+                    if sa.person_id != person_id
+                ]
+                # Add distinct kept assignments
+                self.controller.schema_assignments.extend(kept_assignments)
+                
+                # Capture new state
+                new_assignments_state = [sa.to_dict() for sa in kept_assignments]
+                
+                # Record Undo
+                name = person.display_name if person else "Person"
+                self.controller.undo_manager.record_schema_assignment_change(
+                    f"Stop schemas for {name} from {month}/{year}",
+                    old_assignments_state,
+                    new_assignments_state
+                )
+
+        # =========================================================
+        # PART 2: Clear Existing Cells (Materialized Data)
+        # =========================================================
+        keys_to_process = []
+        for (y, m) in self.controller.schedule.keys():
+            if y > year or (y == year and m >= month):
+                keys_to_process.append((y, m))
+        
+        changes = []
+        for y, m in keys_to_process:
+            month_data = self.controller.get_month_data(y, m)
+            days_in_month = calendar.monthrange(y, m)[1]
+            
+            for day in range(1, days_in_month + 1):
+                old_service = month_data.get_service(person_id, day)
+                if old_service is not None:
+                    changes.append({
+                        "year": y,
+                        "month": m,
+                        "day": day,
+                        "person_id": person_id,
+                        "old_service_id": old_service,
+                        "new_service_id": None
+                    })
+        
+        if not changes:
+            return
+
+        # Record undo
+        name = person.display_name if person else "Person"
+        self.controller.undo_manager.record_bulk_service_change(
+            f"Clear {name}'s schedule from {month}/{year}",
+            changes
+        )
+        
+        # Apply changes (batching UI updates would be better but this is simpler)
+        # We can optimize by disabling auto-save and UI updates until end
+        self.preferences.auto_save = False # temp disable
+        try:
+            for change in changes:
+                self.apply_assignment_change(
+                    person_id=change["person_id"],
+                    day=change["day"],
+                    service_id=None,
+                    year=change["year"],
+                    month=change["month"],
+                    reason="bulk_clear"
+                )
+        finally:
+            self.preferences.auto_save = True # restore
+            self.menu_bar.update_undo_redo_actions()
+            self.quick_save()
 
     # =====================================================
     # 6. ASSIGNMENTS & RULES
@@ -355,6 +738,17 @@ class MainWindow(QMainWindow):
         if month is None:
             month = self.month_combo.currentIndex() + 1
 
+        # Record undo action (unless this is already an undo/redo operation)
+        if reason != "undo":
+            # Get old service before changing
+            month_data = self.controller.get_month_data(year, month)
+            old_service_id = month_data.get_service(person_id, day)
+            
+            # Record the change
+            self.controller.undo_manager.record_service_change(
+                year, month, day, person_id, old_service_id, service_id
+            )
+
         self.controller.apply_assignment_change(person_id, day, service_id, year, month)
         
         # Minimal UI refresh
@@ -374,6 +768,10 @@ class MainWindow(QMainWindow):
             if year == cur_year and month == cur_month:
                 col_idx = day + self.n_prev_days - 1
                 self.refresh_cell(row_idx, col_idx)
+
+        # Update undo/redo menu
+        if reason != "undo":
+            self.menu_bar.update_undo_redo_actions()
 
         # Auto-save if enabled
         if self.preferences and self.preferences.auto_save:

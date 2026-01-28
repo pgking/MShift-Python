@@ -121,7 +121,65 @@ class ColoredVerticalHeader(QHeaderView):
                 row_data = self.main_window.rows[index]
                 if row_data["type"] == "section":
                     self._show_section_context_menu(event.globalPos(), row_data)
+                elif row_data["type"] == "person":
+                    self._show_person_context_menu(event.globalPos(), row_data)
         super().mousePressEvent(event)
+
+    def _show_person_context_menu(self, pos, row_data):
+        """Show context menu for person header."""
+        from PyQt5.QtWidgets import QAction, QMessageBox
+        
+        person_id = row_data["person_id"]
+        person = self.main_window.controller.get_person_by_id(person_id)
+        
+        if not person:
+            return
+            
+        menu = QMenu(self)
+        
+        # Clear current month action
+        clear_month_action = QAction("Clear Schedule (This Month)", self)
+        clear_month_action.triggered.connect(lambda: self._clear_person_schedule_month(person))
+        menu.addAction(clear_month_action)
+        
+        # Clear future action
+        clear_future_action = QAction("Clear Schedule (This Month + Future)", self)
+        clear_future_action.triggered.connect(lambda: self._clear_person_schedule_future(person))
+        menu.addAction(clear_future_action)
+        
+        menu.exec_(pos)
+
+    def _clear_person_schedule_month(self, person):
+        from PyQt5.QtWidgets import QMessageBox
+        year = int(self.main_window.year_combo.currentText())
+        month = self.main_window.month_combo.currentIndex() + 1
+        
+        reply = QMessageBox.question(
+            self.main_window,
+            "Clear Schedule",
+            f"Are you sure you want to clear {person.display_name}'s schedule for {month}/{year}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.main_window.clear_person_schedule_month(person.id, year, month)
+            
+    def _clear_person_schedule_future(self, person):
+        from PyQt5.QtWidgets import QMessageBox
+        year = int(self.main_window.year_combo.currentText())
+        month = self.main_window.month_combo.currentIndex() + 1
+        
+        reply = QMessageBox.question(
+            self.main_window,
+            "Clear Schedule",
+            f"Are you sure you want to clear {person.display_name}'s schedule from {month}/{year} onwards?\n\nThis will delete assignments in all future months.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.main_window.clear_person_schedule_future(person.id, year, month)
     
     def _show_section_context_menu(self, pos, section_data):
         """Show context menu for section header."""
@@ -179,9 +237,19 @@ class ColoredVerticalHeader(QHeaderView):
         )
         
         if reply == QMessageBox.Yes:
+            # Record undo action
+            old_order = section.people_ids.copy()
+            
             self.main_window.controller.sort_section_alphabetically(section.id)
+            
+            # Record the change
+            self.main_window.controller.undo_manager.record_section_sort(
+                section.id, section.label, old_order, section.people_ids.copy()
+            )
+            
             self.main_window.rebuild_rows_from_sections()
             self.main_window.finalize_table_setup()
+            self.main_window.menu_bar.update_undo_redo_actions()
             
             if self.main_window.preferences.auto_save:
                 self.main_window.quick_save()
@@ -190,6 +258,8 @@ class ColoredVerticalHeader(QHeaderView):
         """Rename a section."""
         from PyQt5.QtWidgets import QInputDialog
         
+        old_label = section.label
+        
         new_label, ok = QInputDialog.getText(
             self.main_window,
             "Rename Section",
@@ -197,10 +267,17 @@ class ColoredVerticalHeader(QHeaderView):
             text=section.label
         )
         
-        if ok and new_label.strip():
+        if ok and new_label.strip() and new_label.strip() != old_label:
             section.label = new_label.strip()
+            
+            # Record undo action
+            self.main_window.controller.undo_manager.record_section_rename(
+                section.id, old_label, section.label
+            )
+            
             self.main_window.rebuild_rows_from_sections()
             self.main_window.finalize_table_setup()
+            self.main_window.menu_bar.update_undo_redo_actions()
             
             if self.main_window.preferences.auto_save:
                 self.main_window.quick_save()

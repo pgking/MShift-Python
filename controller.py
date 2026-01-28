@@ -3,6 +3,7 @@ import calendar
 from models import MonthData, Person, Service, Schema, SchemaAssignment, Section
 from rules import evaluate_rules, DayServiceViolation, Rule, DEFAULT_RULES
 from preferences import Preferences
+from undo_manager import ScheduleUndoManager
 
 class ScheduleController:
     """
@@ -19,6 +20,7 @@ class ScheduleController:
         self.sections: List[Section] = []  # Hierarchical sections containing people
         self.preferences: Preferences = Preferences()
         self.rules: List[Rule] = DEFAULT_RULES
+        self.undo_manager = ScheduleUndoManager(max_history=10)  # Undo/redo support
         
         # UI state that needs to be persisted or shared
         self.rows: List[dict] = []
