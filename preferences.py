@@ -18,6 +18,7 @@ class Preferences:
     # Appearance
     row_height: int = 50
     column_width: int = 40
+    service_dropdown_display: str = "short"  # "short" | "full"
 
     def to_dict(self):
         return self.__dict__.copy()

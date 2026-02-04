@@ -51,7 +51,10 @@ class ServiceCell:
 
         for service in self.services:
             if service.is_visible:
-                self.combo.addItem(service.name)
+                # Use preference to determine what to show in dropdown
+                display_mode = getattr(self.main_window.preferences, 'service_dropdown_display', 'short')
+                display_text = service.short_name if display_mode == 'short' else service.name
+                self.combo.addItem(display_text, service.id)  # Store service.id as data
 
         self._apply_style(None)
 
@@ -61,12 +64,10 @@ class ServiceCell:
             service_id = None
             service = None
         else:
-            # We must map back from combo text to correct service object
-            current_name = self.combo.itemText(index)
-            service = next((s for s in self.services if s.name == current_name), None)
-            if service:
-                service_id = service.id
-            else:
+            # Use stored service ID from combo item data
+            service_id = self.combo.itemData(index)
+            service = next((s for s in self.services if s.id == service_id), None)
+            if not service:
                  # Should not happen unless corrupted
                  return
 
@@ -81,6 +82,7 @@ class ServiceCell:
         # UI update after backend is updated
         self.combo.setCurrentIndex(index)
         if service:
+            # Always display short name in the selected cell (collapsed view)
             self.combo.setCurrentText(service.short_name)
         
         self._apply_style(service)
@@ -111,11 +113,11 @@ class ServiceCell:
             # We need to find the index in the COMBOBOX, not the full list
             # Since combo only contains visible items, hidden items won't have an index > 0
             if service.is_visible:
-                # Find index in the filtered list logic (tricky) or just match text
-                index = self.combo.findText(service.name)
+                # Find index by service ID stored in item data
+                index = self.combo.findData(service.id)
                 if index >= 0:
                     self.combo.setCurrentIndex(index)
-                    # Force display of short name
+                    # Always display short name in the selected cell (collapsed view)
                     self.combo.setCurrentText(service.short_name)
             else:
                 # For hidden services, we can't select them in the dropdown

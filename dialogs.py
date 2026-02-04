@@ -435,6 +435,7 @@ class PreferencesDialog(QDialog):
         # Appearance
         self.preferences.row_height = self.row_height_spin.value()
         self.preferences.column_width = self.col_width_spin.value()
+        self.preferences.service_dropdown_display = self.service_dropdown_combo.currentData()
 
         super().accept()
 
@@ -562,6 +563,20 @@ class PreferencesDialog(QDialog):
         
         layout.addRow("Row Height:", self.row_height_spin)
         layout.addRow("Day Column Width:", self.col_width_spin)
+        
+        # Service dropdown display mode
+        self.service_dropdown_combo = QComboBox()
+        self.service_dropdown_combo.addItem("Short names (J, N, etc.)", "short")
+        self.service_dropdown_combo.addItem("Full names (Jour, Nuit, etc.)", "full")
+        
+        # Set current value from preferences
+        index = self.service_dropdown_combo.findData(
+            self.preferences.service_dropdown_display
+        )
+        if index >= 0:
+            self.service_dropdown_combo.setCurrentIndex(index)
+        
+        layout.addRow("Service dropdowns show:", self.service_dropdown_combo)
         
         # Add explanation
         info_label = QLabel(
