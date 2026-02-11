@@ -53,7 +53,7 @@ from copy_paste_handler import CopyPasteHandler
 from dev_seed import load_dev_data
 from migration import rebuild_rows_from_sections
 
-VERSION = "1.0.7"
+VERSION = "1.0.8"
 
 # ============================================================
 # Constants
