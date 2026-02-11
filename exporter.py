@@ -239,8 +239,9 @@ def export_to_image(self):
     # Fonts
     font_title = QFont("Arial", 40, QFont.Bold)
     font_header = QFont("Arial", 14, QFont.Bold)
-    font_cell = QFont("Arial", 12)
+    font_cell = QFont("Arial", 12, QFont.Bold)
     font_bold_cell = QFont("Arial", 12, QFont.Bold)
+    font_name = QFont("Arial", 17, QFont.Bold) # Change this size for person names
 
     # --- Metrics ---
     days_in_month = calendar.monthrange(year, month)[1]
@@ -253,10 +254,9 @@ def export_to_image(self):
     draw_width = IMG_WIDTH - 2 * MARGIN
     draw_height = IMG_HEIGHT - 2 * MARGIN
     
-    # 15% for Name, 10% for Stats, 75% for Days
+    # 10% for Name, 90% for Days
     col_name_width = draw_width * 0.10
-    col_stats_width = draw_width * 0.10
-    col_day_width = (draw_width - col_name_width - col_stats_width) / days_in_month
+    col_day_width = (draw_width - col_name_width) / days_in_month
 
     # --- Draw Title ---
     french_months = [
@@ -332,11 +332,7 @@ def export_to_image(self):
         painter.drawRect(r_bot)
         painter.drawText(r_bot, Qt.AlignCenter, str(day))
 
-    # Stats Header
-    x_stats = MARGIN + col_name_width + days_in_month * col_day_width
-    rect_stats = QRectF(x_stats, current_y, col_stats_width, header_height)
-    painter.drawRect(rect_stats)
-    painter.drawText(rect_stats, Qt.AlignCenter, "BILAN")
+
 
     current_y += header_height
 
@@ -358,21 +354,10 @@ def export_to_image(self):
             
         elif row_data["type"] == "person":
             person = next(p for p in self.people if p.id == row_data["person_id"])
-            summary = self.workload.monthly_summary(person, year, month)
             
             # --- Name Cell ---
-            # Background based on ratio
-            ratio = summary.ratio
-            if ratio < 0.9:
-                name_bg = QColor("#ADD8FF")
-            elif ratio > 1.1:
-                name_bg = QColor("#FFB4B4")
-            else:
-                name_bg = QColor("#B4E6B4")
-            
-            painter.setBrush(QBrush(name_bg))
-            painter.drawRect(QRectF(x, current_y, col_name_width, actual_row_height))
             painter.setBrush(Qt.NoBrush)
+            painter.drawRect(QRectF(x, current_y, col_name_width, actual_row_height))
             
             # Text
             name_text = person.display_name
@@ -380,7 +365,9 @@ def export_to_image(self):
                 name_text += f" ({person.percentage}%)"
             
             # Draw name with some padding
+            painter.setFont(font_name)
             painter.drawText(QRectF(x + 5, current_y, col_name_width - 10, actual_row_height), Qt.AlignVCenter | Qt.AlignLeft, name_text)
+            painter.setFont(font_cell)
             
             # --- Day Cells ---
             cur_x = x + col_name_width
@@ -416,13 +403,7 @@ def export_to_image(self):
                 
                 cur_x += col_day_width
                 
-            # --- Stats Cell ---
-            painter.setBrush(QBrush(name_bg)) # Match name cell bg
-            painter.drawRect(QRectF(cur_x, current_y, col_stats_width, actual_row_height))
-            painter.setBrush(Qt.NoBrush)
-            
-            stats_text = f"{summary.worked:g} / {summary.expected:g}"
-            painter.drawText(QRectF(cur_x, current_y, col_stats_width, actual_row_height), Qt.AlignCenter, stats_text)
+
             
         current_y += actual_row_height
 
