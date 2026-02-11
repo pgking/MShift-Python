@@ -39,7 +39,7 @@ from dialogs import AddPersonDialog, AddServiceDialog, ManageServicesDialog, Pre
 from person_dialogs import ManagePeopleDialog
 from schema_dialogs import CreateSchemaDialog, ManageSchemasDialog
 from menu_bar import MenuBar
-from exporter import export_to_excel
+from exporter import export_to_excel, export_to_image
 from importer import import_from_excel
 from file_io import save_schedule, load_schedule
 from service_cell import ServiceCell
@@ -1685,6 +1685,9 @@ class MainWindow(QMainWindow):
 
     def export_excel(self):
         export_to_excel(self)
+
+    def export_image(self):
+        export_to_image(self)
 
     def import_excel(self):
         import_from_excel(self)

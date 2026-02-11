@@ -84,7 +84,8 @@ class MenuBar(QMenuBar):
         import_menu.addAction("From Excel...", self.parent.import_excel)
 
         export_menu = QMenu("Export", self)
-        export_menu.addAction("Excel", self.parent.export_excel)
+        export_menu.addAction("Excel...", self.parent.export_excel)
+        export_menu.addAction("Image...", self.parent.export_image)
 
         save_exit_action = QAction("Save and Exit", self)
         save_exit_action.setShortcut(QKeySequence.Quit)

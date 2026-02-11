@@ -2,6 +2,8 @@ import openpyxl
 import calendar
 from openpyxl.styles import PatternFill, Alignment
 from PyQt5.QtWidgets import QFileDialog
+from PyQt5.QtGui import QImage, QPainter, QColor, QFont, QPen, QBrush
+from PyQt5.QtCore import Qt, QRect, QRectF
 
 from cell_authority import resolve_cell_appearance
 
@@ -207,3 +209,226 @@ def export_to_excel(self):
 
         wb.save(path)
         print(f"Exported schedule to {path}")
+
+def export_to_image(self):
+    month = self.month_combo.currentIndex() + 1
+    year = int(self.year_combo.currentText())
+
+    key = (year, month)
+    if key not in self.schedule:
+        print("No data to export for this month")
+        return
+
+    path, _ = QFileDialog.getSaveFileName(self, "Export to Image", "", "PNG Image (*.png);;JPEG Image (*.jpg);;All Files (*)")
+    if not path:
+        return
+
+    # A4 Landscape at 300 DPI
+    # Width: 297mm * (300 / 25.4) ≈ 3508 px
+    # Height: 210mm * (300 / 25.4) ≈ 2480 px
+    IMG_WIDTH = 3508
+    IMG_HEIGHT = 2480
+    MARGIN = 50
+
+    image = QImage(IMG_WIDTH, IMG_HEIGHT, QImage.Format_ARGB32)
+    image.fill(Qt.white)
+
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.Antialiasing)
+
+    # Fonts
+    font_title = QFont("Arial", 40, QFont.Bold)
+    font_header = QFont("Arial", 14, QFont.Bold)
+    font_cell = QFont("Arial", 12)
+    font_bold_cell = QFont("Arial", 12, QFont.Bold)
+
+    # --- Metrics ---
+    days_in_month = calendar.monthrange(year, month)[1]
+    
+    # We want: Name Col | Day Cols ... | Stats Col
+    # Let's assign proportions or fixed sizes.
+    # Name need decent space. Stats need small space. Days need the rest.
+    
+    # Available width
+    draw_width = IMG_WIDTH - 2 * MARGIN
+    draw_height = IMG_HEIGHT - 2 * MARGIN
+    
+    # 15% for Name, 10% for Stats, 75% for Days
+    col_name_width = draw_width * 0.10
+    col_stats_width = draw_width * 0.10
+    col_day_width = (draw_width - col_name_width - col_stats_width) / days_in_month
+
+    # --- Draw Title ---
+    french_months = [
+        "", "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+        "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"
+    ]
+    month_name_fr = french_months[month]
+
+    painter.setFont(font_title)
+    title_rect = QRect(MARGIN, MARGIN, int(draw_width), 80)
+    painter.drawText(title_rect, Qt.AlignCenter, f"{month_name_fr.upper()} {year}")
+
+    current_y = MARGIN + 100
+
+    # --- Draw Headers ---
+    # We have 2 header rows: Day Names (Lun, Mar...) and Day Numbers (1, 2...)
+    # But first, calculate row height based on content to fit?
+    
+    # Count rows: Header (2) + Data Rows (Sections + People)
+    num_data_rows = len(self.rows)
+    total_rows = num_data_rows + 2 
+    
+    # Remaining height for table
+    table_height = IMG_HEIGHT - MARGIN - current_y
+    
+    # Calculate row height
+    # use a comfortable height, but scale down if too many people
+    target_row_height = 45
+    min_row_height = 30
+    
+    # Check if it fits
+    if target_row_height * total_rows > table_height:
+        actual_row_height = max(min_row_height, int(table_height / total_rows))
+    else:
+        actual_row_height = target_row_height
+
+    header_height = actual_row_height * 2
+
+    painter.setFont(font_header)
+    painter.setPen(QPen(Qt.black, 2))
+
+    # Name Header
+    rect_name = QRectF(MARGIN, current_y, col_name_width, header_height)
+    painter.drawRect(rect_name)
+    painter.drawText(rect_name, Qt.AlignCenter, f"{month_name_fr.upper()} {year}")
+
+    # Day Headers
+    french_days = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+    
+    for day in range(1, days_in_month + 1):
+        x = MARGIN + col_name_width + (day - 1) * col_day_width
+        
+        # Determine day name
+        weekday = calendar.weekday(year, month, day)
+        day_str = french_days[weekday]
+        
+        # Check weekend/holiday for background
+        is_weekend = weekday >= 5
+        is_holiday = day in self.schedule[key].holidays
+        
+        bg_brush = Qt.NoBrush
+        if is_weekend or is_holiday:
+            bg_brush = QBrush(QColor("#DDDDDD"))
+            painter.fillRect(QRectF(x, current_y, col_day_width, header_height), bg_brush)
+        
+        # Top half: Name
+        r_top = QRectF(x, current_y, col_day_width, actual_row_height)
+        painter.drawRect(r_top)
+        painter.drawText(r_top, Qt.AlignCenter, day_str)
+        
+        # Bottom half: Number
+        r_bot = QRectF(x, current_y + actual_row_height, col_day_width, actual_row_height)
+        painter.drawRect(r_bot)
+        painter.drawText(r_bot, Qt.AlignCenter, str(day))
+
+    # Stats Header
+    x_stats = MARGIN + col_name_width + days_in_month * col_day_width
+    rect_stats = QRectF(x_stats, current_y, col_stats_width, header_height)
+    painter.drawRect(rect_stats)
+    painter.drawText(rect_stats, Qt.AlignCenter, "BILAN")
+
+    current_y += header_height
+
+    # --- Draw Rows ---
+    painter.setFont(font_cell)
+    
+    for row_data in self.rows:
+        x = MARGIN
+        
+        if row_data["type"] == "section":
+            # Section Row
+            painter.setBrush(QBrush(QColor("#E0E0E0")))
+            painter.drawRect(QRectF(x, current_y, draw_width, actual_row_height))
+            painter.setBrush(Qt.NoBrush)
+            
+            painter.setFont(font_header)
+            painter.drawText(QRectF(x, current_y, draw_width, actual_row_height), Qt.AlignCenter, row_data["label"])
+            painter.setFont(font_cell)
+            
+        elif row_data["type"] == "person":
+            person = next(p for p in self.people if p.id == row_data["person_id"])
+            summary = self.workload.monthly_summary(person, year, month)
+            
+            # --- Name Cell ---
+            # Background based on ratio
+            ratio = summary.ratio
+            if ratio < 0.9:
+                name_bg = QColor("#ADD8FF")
+            elif ratio > 1.1:
+                name_bg = QColor("#FFB4B4")
+            else:
+                name_bg = QColor("#B4E6B4")
+            
+            painter.setBrush(QBrush(name_bg))
+            painter.drawRect(QRectF(x, current_y, col_name_width, actual_row_height))
+            painter.setBrush(Qt.NoBrush)
+            
+            # Text
+            name_text = person.display_name
+            if person.percentage != 100:
+                name_text += f" ({person.percentage}%)"
+            
+            # Draw name with some padding
+            painter.drawText(QRectF(x + 5, current_y, col_name_width - 10, actual_row_height), Qt.AlignVCenter | Qt.AlignLeft, name_text)
+            
+            # --- Day Cells ---
+            cur_x = x + col_name_width
+            month_data = self.schedule[key]
+            
+            for day in range(1, days_in_month + 1):
+                weekday = calendar.weekday(year, month, day)
+                is_weekend = weekday >= 5
+                is_holiday = day in month_data.holidays
+                
+                service_id = month_data.get_service(person.id, day)
+                
+                # Resolve appearance
+                appearance = resolve_cell_appearance(service_id, is_holiday, is_weekend, self.services)
+                
+                cell_bg = Qt.white
+                cell_text = ""
+                
+                if appearance.type == "service" and appearance.service:
+                    cell_bg = QColor(appearance.service.color_hex)
+                    cell_text = appearance.service.short_name
+                elif appearance.type == "holiday":
+                    cell_bg = QColor("#DDDDDD")
+                elif appearance.type == "weekend":
+                    cell_bg = QColor("#DDDDDD")
+                    
+                painter.setBrush(QBrush(cell_bg))
+                painter.drawRect(QRectF(cur_x, current_y, col_day_width, actual_row_height))
+                painter.setBrush(Qt.NoBrush)
+                
+                if cell_text:
+                    painter.drawText(QRectF(cur_x, current_y, col_day_width, actual_row_height), Qt.AlignCenter, cell_text)
+                
+                cur_x += col_day_width
+                
+            # --- Stats Cell ---
+            painter.setBrush(QBrush(name_bg)) # Match name cell bg
+            painter.drawRect(QRectF(cur_x, current_y, col_stats_width, actual_row_height))
+            painter.setBrush(Qt.NoBrush)
+            
+            stats_text = f"{summary.worked:g} / {summary.expected:g}"
+            painter.drawText(QRectF(cur_x, current_y, col_stats_width, actual_row_height), Qt.AlignCenter, stats_text)
+            
+        current_y += actual_row_height
+
+    painter.end()
+    
+    if image.save(path):
+        print(f"Exported image to {path}")
+    else:
+        print(f"Failed to save image to {path}")
