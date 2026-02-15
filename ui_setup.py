@@ -75,6 +75,16 @@ def _setup_controls(mw):
     mw.year_combo.setCurrentText(f"{real_life_year}")
     mw.year_combo.currentIndexChanged.connect(mw.finalize_table_setup)
 
+    # Zoom label
+    mw.zoom_label = QLabel("🔍 100%")
+    mw.zoom_label.setStyleSheet(
+        "padding: 4px 8px; border: 1px solid #aaa; border-radius: 4px; "
+        "color: #555; font-size: 11px;"
+    )
+    mw.zoom_label.setToolTip("Ctrl + Mouse Wheel to zoom\nCtrl + Enter to reset")
+    mw.zoom_label.setCursor(Qt.PointingHandCursor)
+    mw.zoom_label.mousePressEvent = lambda e: mw._reset_zoom()
+
     controls_layout.addStretch()
     controls_layout.addWidget(QLabel("Month:"))
     controls_layout.addWidget(mw.month_combo)
@@ -82,6 +92,8 @@ def _setup_controls(mw):
     controls_layout.addWidget(next_btn)
     controls_layout.addWidget(QLabel("Year:"))
     controls_layout.addWidget(mw.year_combo)
+    controls_layout.addSpacing(20)
+    controls_layout.addWidget(mw.zoom_label)
     controls_layout.addStretch()
 
     mw.main_layout.addLayout(controls_layout)

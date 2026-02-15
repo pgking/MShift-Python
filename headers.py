@@ -44,11 +44,15 @@ class ColoredVerticalHeader(QHeaderView):
         if stats:
             self._paint_stats_circles(painter, rect, stats)
 
+    def _get_zoom(self):
+        return getattr(self.main_window, '_zoom_factor', 1.0)
+
     def _get_stats_geometry(self, rect):
         """Returns (night_rect, weekend_rect) relative to rect."""
-        circle_size = 10
-        margin_right = 6
-        spacing = 4
+        zoom = self._get_zoom()
+        circle_size = int(10 * zoom)
+        margin_right = int(6 * zoom)
+        spacing = int(4 * zoom)
         
         # Right aligned
         x = rect.right() - margin_right - circle_size
@@ -181,7 +185,8 @@ class ColoredVerticalHeader(QHeaderView):
         new_assignment = SchemaAssignment(
             person_id=person.id,
             schema_id=schema.id,
-            repeat_mode="always", # Default to always?
+            repeat_mode="limited",
+            repeat_months=1,
             start_year=year,
             start_month=month,
             overwrite_existing=True
@@ -405,15 +410,30 @@ class ColoredVerticalHeader(QHeaderView):
         super().mouseReleaseEvent(event)
 
 class ClickableHorizontalHeader(QHeaderView):
-    ICON_SIZE = 13
-    ICON_SPACING = 4
-    ICON_MARGIN = 4
+    BASE_ICON_SIZE = 13
+    BASE_ICON_SPACING = 4
+    BASE_ICON_MARGIN = 4
 
     def __init__(self, main_window, parent=None):
         super().__init__(Qt.Horizontal, parent)
         self.main_window = main_window
         self.setMouseTracking(True)
         self.setSectionsClickable(True)
+
+    def _get_zoom(self):
+        return getattr(self.main_window, '_zoom_factor', 1.0)
+
+    @property
+    def ICON_SIZE(self):
+        return int(self.BASE_ICON_SIZE * self._get_zoom())
+
+    @property
+    def ICON_SPACING(self):
+        return int(self.BASE_ICON_SPACING * self._get_zoom())
+
+    @property
+    def ICON_MARGIN(self):
+        return int(self.BASE_ICON_MARGIN * self._get_zoom())
 
     def mousePressEvent(self, event):
         if event.button() == Qt.RightButton:
@@ -491,7 +511,7 @@ class ClickableHorizontalHeader(QHeaderView):
                 painter.setPen(color)
                 font = painter.font()
                 font.setBold(True)
-                font.setPointSize(9)
+                font.setPointSize(max(1, int(9 * self._get_zoom())))
                 painter.setFont(font)
                 painter.drawText(
                     x,

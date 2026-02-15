@@ -30,8 +30,10 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtGui import (
     QColor,
-    QBrush
+    QBrush,
+    QFont
 )
+
 
 # App modules
 from models import Person, Service, MonthData, Schema, SchemaAssignment
@@ -53,7 +55,7 @@ from copy_paste_handler import CopyPasteHandler
 from dev_seed import load_dev_data
 from migration import rebuild_rows_from_sections
 
-VERSION = "1.0.8"
+VERSION = "1.0.9"
 
 # ============================================================
 # Constants
@@ -63,6 +65,12 @@ UPDATE_CHECK_DELAY_MS = 2000   # Delay before checking for updates on startup
 FILE_MTIME_TOLERANCE_S = 0.1   # Tolerance for file modification time comparison
 MAX_RECENT_FILES = 3           # Maximum number of recent files to track
 MAX_BACKUP_FILES = 5           # Maximum number of backup files to keep
+
+# Zoom
+ZOOM_STEP = 0.1
+ZOOM_MIN = 0.5
+ZOOM_MAX = 2.0
+ZOOM_DEFAULT = 1.0
 
 
 # ============================================================
@@ -88,6 +96,8 @@ class MainWindow(QMainWindow):
         self.drag_drop_handler = DragDropHandler(self)
         self.copy_paste_handler = CopyPasteHandler(self)
         self._shift_only_down = False
+        self._zoom_factor = ZOOM_DEFAULT
+        self._base_font = QApplication.font()  # Capture default app font
         
         # Row dragging state (used by headers.py)
         self._row_dragging = False
@@ -859,13 +869,74 @@ class MainWindow(QMainWindow):
         if obj is self.table.viewport():
             if event.type() == QEvent.Wheel:
                 modifiers = QApplication.keyboardModifiers()
+                if modifiers & Qt.ControlModifier:
+                    delta = event.angleDelta().y()
+                    if delta > 0:
+                        self._set_zoom(self._zoom_factor + ZOOM_STEP)
+                    elif delta < 0:
+                        self._set_zoom(self._zoom_factor - ZOOM_STEP)
+                    return True
                 if modifiers & Qt.ShiftModifier:
                     delta = event.angleDelta().y()
                     bar = self.table.horizontalScrollBar()
                     bar.setValue(bar.value() - (delta // 12))
                     return True
                     
+        # Ctrl+Enter: reset zoom to 100%
+        if event.type() == QEvent.KeyPress:
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter) and event.modifiers() & Qt.ControlModifier:
+                self._reset_zoom()
+                return True
+
         return super().eventFilter(obj, event)
+
+    # =====================================================
+    # ZOOM
+    # =====================================================
+    def _set_zoom(self, factor):
+        """Set zoom factor, clamped to [ZOOM_MIN, ZOOM_MAX]."""
+        factor = round(max(ZOOM_MIN, min(ZOOM_MAX, factor)), 2)
+        if factor == self._zoom_factor:
+            return
+        self._zoom_factor = factor
+        self._apply_zoom()
+
+    def _reset_zoom(self):
+        """Reset zoom to 100%."""
+        self._set_zoom(ZOOM_DEFAULT)
+
+    def _apply_zoom(self):
+        """Apply the current zoom factor to the table."""
+        # Scale font
+        scaled_font = QFont(self._base_font)
+        scaled_font.setPointSizeF(self._base_font.pointSizeF() * self._zoom_factor)
+        self.table.setFont(scaled_font)
+        self.table.horizontalHeader().setFont(scaled_font)
+        self.table.verticalHeader().setFont(scaled_font)
+
+        # Scale column widths
+        base_col_w = self.preferences.column_width
+        scaled_col_w = int(base_col_w * self._zoom_factor)
+        for col in range(self.table.columnCount()):
+            if col == self.table.columnCount() - 1:
+                continue  # Notes column stays dynamic
+            self.table.setColumnWidth(col, scaled_col_w)
+
+        # Scale row heights
+        base_row_h = self.preferences.row_height
+        scaled_row_h = int(base_row_h * self._zoom_factor)
+        self.table.verticalHeader().setDefaultSectionSize(scaled_row_h)
+
+        # Scale vertical header width
+        base_header_w = 80
+        scaled_header_w = int(base_header_w * self._zoom_factor)
+        self.table.verticalHeader().setMinimumWidth(scaled_header_w)
+
+        # Update zoom label
+        if hasattr(self, 'zoom_label'):
+            self.zoom_label.setText(f"🔍 {int(self._zoom_factor * 100)}%")
+
+        self.table.viewport().update()
 
     def _handle_modifier_keys(self, event) -> bool:
         if event.type() not in (QEvent.KeyPress, QEvent.KeyRelease):

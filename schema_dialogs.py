@@ -315,29 +315,45 @@ class CreateSchemaDialog(QDialog):
         main_layout.addLayout(button_layout)
     
     def _rebuild_table(self):
-        """Rebuild the pattern table based on span_days."""
+        """Rebuild the pattern table based on span_days, preserving existing data."""
         span = self.span_spin.value()
+        old_count = self.pattern_table.columnCount()
+
+        # Save existing cell data before resizing
+        saved = {}
+        for col in range(min(old_count, span)):
+            item = self.pattern_table.item(0, col)
+            if item and item.data(Qt.UserRole):
+                saved[col] = {
+                    "text": item.text(),
+                    "bg": item.background(),
+                    "service_id": item.data(Qt.UserRole)
+                }
+
         self.pattern_table.setColumnCount(span)
-        
+
         # Set headers as "Jour 1", "Jour 2", etc.
         headers = [f"Jour {i+1}" for i in range(span)]
         self.pattern_table.setHorizontalHeaderLabels(headers)
-        
-        # Clear all cells
+
+        # Populate cells — restore saved data or create empty
         for col in range(span):
             item = self.pattern_table.item(0, col)
             if not item:
                 item = QTableWidgetItem("")
                 self.pattern_table.setItem(0, col, item)
-            else:
+
+            item.setTextAlignment(Qt.AlignCenter)
+
+            if col in saved:
+                item.setText(saved[col]["text"])
+                item.setBackground(saved[col]["bg"])
+                item.setData(Qt.UserRole, saved[col]["service_id"])
+            elif col >= old_count:
+                # New column — initialize empty
                 item.setText("")
                 item.setBackground(QBrush(Qt.white))
-            
-            # Center text alignment
-            item.setTextAlignment(Qt.AlignCenter)
-            
-            # Store service_id in item data
-            item.setData(Qt.UserRole, None)
+                item.setData(Qt.UserRole, None)
     
     def _on_cell_clicked(self, row, col):
         """Show service selection menu when cell is clicked."""
@@ -661,6 +677,12 @@ class ManageSchemasDialog(QDialog):
         new_span = self.span_spin.value()
         
         self.current_schema.span_days = new_span
+        
+        # Prune pattern entries beyond new span
+        if new_span < old_span:
+            keys_to_remove = [k for k in self.current_schema.pattern if k >= new_span]
+            for k in keys_to_remove:
+                del self.current_schema.pattern[k]
         
         # Rebuild table (preserving existing pattern where possible)
         self._rebuild_pattern_table()

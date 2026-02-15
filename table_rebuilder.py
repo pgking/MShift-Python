@@ -1,7 +1,7 @@
 import calendar
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QTableWidgetItem, QHeaderView
-from PyQt5.QtGui import QColor, QBrush
+from PyQt5.QtGui import QColor, QBrush, QFont
 
 
 class TableRebuilder:
@@ -19,17 +19,36 @@ class TableRebuilder:
 
         self.rebuild_structure_and_rows()
 
-        # Row Height
-        self.table.verticalHeader().setDefaultSectionSize(self.mw.preferences.row_height)
+        # Zoom factor
+        zoom = getattr(self.mw, '_zoom_factor', 1.0)
 
-        # Column width
+        # Row Height (zoomed)
+        base_row_h = self.mw.preferences.row_height
+        self.table.verticalHeader().setDefaultSectionSize(int(base_row_h * zoom))
+
+        # Column width (zoomed)
+        base_col_w = self.mw.preferences.column_width
+        scaled_col_w = int(base_col_w * zoom)
         for col in range(self.table.columnCount()):
             if col == self.table.columnCount() - 1:
                 # Notes Column - Dynamic Width
                 self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
             else:
                 self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.Fixed)
-                self.table.setColumnWidth(col, self.mw.preferences.column_width)
+                self.table.setColumnWidth(col, scaled_col_w)
+
+        # Font (zoomed)
+        if hasattr(self.mw, '_base_font'):
+            scaled_font = QFont(self.mw._base_font)
+            scaled_font.setPointSizeF(self.mw._base_font.pointSizeF() * zoom)
+            self.table.setFont(scaled_font)
+            self.table.horizontalHeader().setFont(scaled_font)
+            self.table.verticalHeader().setFont(scaled_font)
+
+        # Vertical header width (zoomed)
+        base_header_w = 80
+        self.table.verticalHeader().setMinimumWidth(int(base_header_w * zoom))
+
         # Ensure section rows have no stray items
         for row, row_data in enumerate(self.mw.rows):
             if row_data["type"] == "section":
