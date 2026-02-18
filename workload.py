@@ -57,7 +57,7 @@ class WorkloadCalculator:
 
             service = next((s for s in self.services if s.id == service_id), None)
             if service:
-                total_hours += service.get_duration(year, month, day, month_data.holidays)
+                total_hours += service.get_duration(year, month, day, month_data.holidays, person_percentage=person.percentage)
 
         return total_hours
     

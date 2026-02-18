@@ -109,20 +109,20 @@ class Service:
         self.color_hex = color_hex
         self.is_visible = is_visible
 
-    def get_duration(self, year, month, day, holidays):
+    def get_duration(self, year, month, day, holidays, person_percentage=100):
         """
         Returns the duration of the service for a specific date.
         Handles special logic for services like 'CA' (Congés Annuels).
         """
         if self.short_name == "CA":
             # Congés Annuels Logic:
-            # 7h per day, except weekends and holidays.
+            # 7h per day * percentage, except weekends and holidays.
             weekday = calendar.weekday(year, month, day)
             if weekday >= 5: # Saturday=5, Sunday=6
                 return 0.0
             if day in holidays:
                 return 0.0
-            return 7.0
+            return 7.0 * (person_percentage / 100.0)
             
         return float(self.hours)
 
@@ -247,7 +247,7 @@ class SchemaAssignment:
     """
     def __init__(self, person_id: str, schema_id: str, repeat_mode: str = "always", 
                  repeat_months: int = 1, start_year: int = None, start_month: int = None,
-                 overwrite_existing: bool = True):
+                 overwrite_existing: bool = False):
         self.person_id = person_id
         self.schema_id = schema_id
         self.repeat_mode = repeat_mode  # "always" or "limited"

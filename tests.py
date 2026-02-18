@@ -96,6 +96,12 @@ class TestServiceModel(unittest.TestCase):
         # 2026-01-15 is Thursday
         self.assertEqual(s.get_duration(2026, 1, 15, set()), 7.0)
 
+    def test_duration_ca_percentage(self):
+        s = Service("Congés Annuels", "CA", 7, "#FFD6A3")
+        # 80% of 7h = 5.6h
+        self.assertAlmostEqual(s.get_duration(2026, 1, 15, set(), 80), 5.6)
+
+
     def test_duration_ca_weekend(self):
         s = Service("Congés Annuels", "CA", 7, "#FFD6A3")
         # 2026-01-18 is Sunday

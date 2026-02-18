@@ -772,7 +772,7 @@ class ManageSchemasDialog(QDialog):
         self._add_assignment_row(None, None)
     
     def _add_assignment_row(self, person=None, assignment=None):
-        """Add an assignment row with person selector, repeat options, and overwrite checkbox."""
+        """Add an assignment row with person selector and repeat options."""
         row_widget = QWidget()
         row_layout = QHBoxLayout(row_widget)
         row_layout.setContentsMargins(0, 2, 0, 2)
@@ -819,12 +819,7 @@ class ManageSchemasDialog(QDialog):
         
         row_layout.addWidget(months_spin)
         
-        # Overwrite checkbox
-        overwrite_check = QCheckBox("Écraser")
-        overwrite_check.setChecked(True)  # Checked by default
-        overwrite_check.setToolTip("Écraser les services existants lors de l'application du schéma")
-        
-        row_layout.addWidget(overwrite_check)
+
         
         # Apply button (for debugging/manual application)
         apply_btn = QPushButton("Apply")
@@ -842,7 +837,7 @@ class ManageSchemasDialog(QDialog):
         # Connect events
         def on_person_changed():
             self._on_assignment_changed(
-                person_combo, repeat_combo, months_spin, overwrite_check, assignment
+                person_combo, repeat_combo, months_spin, assignment
             )
         
         def on_repeat_mode_changed():
@@ -855,19 +850,14 @@ class ManageSchemasDialog(QDialog):
             if assignment:
                 assignment.repeat_months = months_spin.value()
         
-        def on_overwrite_changed():
-            if assignment:
-                assignment.overwrite_existing = overwrite_check.isChecked()
-        
         person_combo.currentIndexChanged.connect(on_person_changed)
         repeat_combo.currentIndexChanged.connect(on_repeat_mode_changed)
         months_spin.valueChanged.connect(on_months_changed)
-        overwrite_check.stateChanged.connect(on_overwrite_changed)
         
         # Insert before the stretch
         self.assignments_layout.insertWidget(self.assignments_layout.count() - 1, row_widget)
     
-    def _on_assignment_changed(self, person_combo, repeat_combo, months_spin, overwrite_check, existing_assignment):
+    def _on_assignment_changed(self, person_combo, repeat_combo, months_spin, existing_assignment):
         """Handle assignment change."""
         if not self.current_schema:
             return
@@ -886,7 +876,7 @@ class ManageSchemasDialog(QDialog):
             existing_assignment.person_id = person_id
             existing_assignment.repeat_mode = repeat_combo.currentData()
             existing_assignment.repeat_months = months_spin.value()
-            existing_assignment.overwrite_existing = overwrite_check.isChecked()
+            existing_assignment.overwrite_existing = False
         else:
             # Create new assignment
             from models import SchemaAssignment
@@ -897,7 +887,7 @@ class ManageSchemasDialog(QDialog):
                 repeat_months=months_spin.value(),
                 start_year=int(self.main_window.year_combo.currentText()) if self.main_window else 2024,
                 start_month=self.main_window.month_combo.currentIndex() + 1 if self.main_window else 1,
-                overwrite_existing=overwrite_check.isChecked()
+                overwrite_existing=False
             )
             self.schema_assignments.append(new_assignment)
     

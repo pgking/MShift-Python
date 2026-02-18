@@ -189,7 +189,7 @@ class ColoredVerticalHeader(QHeaderView):
             repeat_months=1,
             start_year=year,
             start_month=month,
-            overwrite_existing=True
+            overwrite_existing=False
         )
         
         # 3. Create new state (append)

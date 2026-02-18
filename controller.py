@@ -387,7 +387,7 @@ class ScheduleController:
         elif assignment.repeat_mode == "always":
             limit = 24  # Apply for 2 years (reasonable horizon)
             
-        overwrite = getattr(assignment, 'overwrite_existing', True)
+        overwrite = False  # Never overwrite existing services
         start_period = (start_year, start_month)
         
         # Determine start index (months from year 0)
@@ -421,8 +421,8 @@ class ScheduleController:
             if not schema:
                 continue
             
-            # Apply the schema to this person with the assignment's overwrite setting
-            overwrite = getattr(assignment, 'overwrite_existing', True)  # Default to True for old assignments
+            # Never overwrite existing services
+            overwrite = False
             start_period = (assignment.start_year, assignment.start_month) if assignment.start_year else None
             
             self.apply_schema_to_month(

@@ -63,7 +63,7 @@ from copy_paste_handler import CopyPasteHandler
 from dev_seed import load_dev_data
 from migration import rebuild_rows_from_sections
 
-VERSION = "1.0.11"
+VERSION = "1.0.12"
 
 # ============================================================
 # Constants
@@ -1369,7 +1369,7 @@ class MainWindow(QMainWindow):
                     person.id,
                     year,
                     month,
-                    overwrite=True,  # Default to overwriting
+                    overwrite=False,  # Never overwrite existing services
                     start_period=(year, month)
                 )
             
