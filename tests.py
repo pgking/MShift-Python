@@ -5,513 +5,750 @@ Run with: python tests.py
 Or with verbose output: python tests.py -v
 
 Tests cover:
-- Model creation and serialization
-- Schema pattern application
-- Assignment logic and repetition
-- Workload calculations
-- File I/O operations
+- Model creation, serialization, edge cases
+- Section management
+- Schema pattern application & assignment logic
+- Controller operations (assignments, stats, sections, recent files)
+- Rules engine & violation detection
+- Preferences serialization
+- Undo/Redo manager
+- File I/O round-trip operations
 """
 
 import unittest
 import os
 import tempfile
 import json
+import calendar
 from datetime import datetime
 
-# Import models and core functionality
-from models import Person, Service, MonthData, Schema, SchemaAssignment
+from models import Person, Service, MonthData, Schema, SchemaAssignment, Section
 from controller import ScheduleController
-from workload import WorkloadCalculator
+from rules import StaffingRule, ServiceKind, Severity, evaluate_rules, DEFAULT_RULES
+from preferences import Preferences
+from undo_manager import UndoManager, UndoableAction, ScheduleUndoManager
 
 
+# ================================================================
+# PERSON MODEL
+# ================================================================
 class TestPersonModel(unittest.TestCase):
-    """Test Person model functionality."""
-    
-    def test_person_creation(self):
-        """Test creating a person with basic attributes."""
-        person = Person(prenom="Marie", nom="Dupont", percentage=100)
-        
-        self.assertEqual(person.prenom, "Marie")
-        self.assertEqual(person.nom, "Dupont")
-        self.assertEqual(person.percentage, 100)
-        self.assertIsNotNone(person.id)
-    
-    def test_person_display_name(self):
-        """Test the display_name property formatting."""
-        person = Person(prenom="marie", nom="dupont", percentage=100)
-        
-        # Should be "Marie DUPONT"
-        self.assertEqual(person.display_name, "Marie DUPONT")
-    
-    def test_person_short_name_with_prenom(self):
-        """Test short name generation with first name."""
-        person = Person(prenom="Marie", nom="Dupont", percentage=100)
-        
-        # Should be "M. Dupont"
-        self.assertEqual(person.short_name, "M. Dupont")
-    
-    def test_person_short_name_without_prenom(self):
-        """Test short name generation without first name."""
-        person = Person(prenom="", nom="Dupont", percentage=100)
-        
-        # Should be "Dupont"
-        self.assertEqual(person.short_name, "Dupont")
-    
-    def test_person_serialization(self):
-        """Test person to_dict and back."""
-        person = Person(prenom="Marie", nom="Dupont", percentage=80)
-        person_id = person.id
-        
-        data = person.to_dict()
-        
-        self.assertEqual(data["prenom"], "Marie")
-        self.assertEqual(data["nom"], "Dupont")
-        self.assertEqual(data["percentage"], 80)
-        self.assertEqual(data["id"], person_id)
+    def test_creation(self):
+        p = Person(prenom="Marie", nom="Dupont", percentage=100)
+        self.assertEqual(p.prenom, "Marie")
+        self.assertEqual(p.nom, "Dupont")
+        self.assertEqual(p.percentage, 100)
+        self.assertIsNotNone(p.id)
+
+    def test_display_name(self):
+        p = Person(prenom="marie", nom="dupont", percentage=100)
+        self.assertEqual(p.display_name, "Marie DUPONT")
+
+    def test_display_name_no_prenom(self):
+        p = Person(prenom="", nom="dupont", percentage=100)
+        self.assertEqual(p.display_name, "DUPONT")
+
+    def test_short_name_default(self):
+        p = Person(prenom="Marie", nom="Dupont", percentage=100)
+        self.assertEqual(p.short_name, "M. Dupont")
+
+    def test_short_name_no_prenom(self):
+        p = Person(prenom="", nom="Dupont", percentage=100)
+        self.assertEqual(p.short_name, "Dupont")
+
+    def test_short_name_custom(self):
+        p = Person(prenom="Marie", nom="Dupont", percentage=100, short_name="MD")
+        self.assertEqual(p.short_name, "MD")
+
+    def test_serialization_roundtrip(self):
+        p = Person(prenom="Marie", nom="Dupont", percentage=80, section_id="sec1")
+        data = p.to_dict()
+        p2 = Person(**data)
+        self.assertEqual(p2.prenom, "Marie")
+        self.assertEqual(p2.nom, "Dupont")
+        self.assertEqual(p2.percentage, 80)
+        self.assertEqual(p2.id, p.id)
+        self.assertEqual(p2.section_id, "sec1")
+
+    def test_whitespace_stripped(self):
+        p = Person(prenom="  Marie  ", nom="  Dupont  ", percentage=100)
+        self.assertEqual(p.prenom, "Marie")
+        self.assertEqual(p.nom, "Dupont")
 
 
+# ================================================================
+# SERVICE MODEL
+# ================================================================
 class TestServiceModel(unittest.TestCase):
-    """Test Service model functionality."""
-    
-    def test_service_creation(self):
-        """Test creating a service."""
-        service = Service("Jour", "J", 12, "#A3D5FF")
-        
-        self.assertEqual(service.name, "Jour")
-        self.assertEqual(service.short_name, "J")
-        self.assertEqual(service.hours, 12)
-        self.assertEqual(service.color_hex, "#A3D5FF")
-        self.assertTrue(service.is_visible)
-    
-    def test_service_duration_normal(self):
-        """Test normal service duration."""
-        service = Service("Jour", "J", 12, "#A3D5FF")
-        
-        # Should return the hours value
-        duration = service.get_duration(2026, 1, 15, set())
-        self.assertEqual(duration, 12.0)
-    
-    def test_service_duration_conges_weekday(self):
-        """Test Congés Annuels duration on weekday."""
-        service = Service("Congés Annuels", "CA", 7, "#FFD6A3")
-        
-        # Wednesday, not a holiday - should be 7h
-        duration = service.get_duration(2026, 1, 15, set())
-        self.assertEqual(duration, 7.0)
-    
-    def test_service_duration_conges_weekend(self):
-        """Test Congés Annuels duration on weekend."""
-        service = Service("Congés Annuels", "CA", 7, "#FFD6A3")
-        
-        # Saturday - should be 0h
-        duration = service.get_duration(2026, 1, 18, set())
-        self.assertEqual(duration, 0.0)
-    
-    def test_service_duration_conges_holiday(self):
-        """Test Congés Annuels duration on holiday."""
-        service = Service("Congés Annuels", "CA", 7, "#FFD6A3")
-        
-        # Holiday - should be 0h
-        duration = service.get_duration(2026, 1, 15, {15})
-        self.assertEqual(duration, 0.0)
-    
-    def test_service_serialization(self):
-        """Test service to_dict."""
-        service = Service("Jour", "J", 12, "#A3D5FF", is_visible=False)
-        service_id = service.id
-        
-        data = service.to_dict()
-        
-        self.assertEqual(data["name"], "Jour")
-        self.assertEqual(data["short_name"], "J")
-        self.assertEqual(data["hours"], 12)
-        self.assertEqual(data["color_hex"], "#A3D5FF")
-        self.assertEqual(data["id"], service_id)
-        self.assertFalse(data["is_visible"])
+    def test_creation(self):
+        s = Service("Jour", "J", 12, "#A3D5FF")
+        self.assertEqual(s.name, "Jour")
+        self.assertEqual(s.short_name, "J")
+        self.assertEqual(s.hours, 12)
+        self.assertTrue(s.is_visible)
+
+    def test_duration_normal(self):
+        s = Service("Jour", "J", 12, "#A3D5FF")
+        self.assertEqual(s.get_duration(2026, 1, 15, set()), 12.0)
+
+    def test_duration_ca_weekday(self):
+        s = Service("Congés Annuels", "CA", 7, "#FFD6A3")
+        # 2026-01-15 is Thursday
+        self.assertEqual(s.get_duration(2026, 1, 15, set()), 7.0)
+
+    def test_duration_ca_weekend(self):
+        s = Service("Congés Annuels", "CA", 7, "#FFD6A3")
+        # 2026-01-18 is Sunday
+        self.assertEqual(s.get_duration(2026, 1, 18, set()), 0.0)
+
+    def test_duration_ca_holiday(self):
+        s = Service("Congés Annuels", "CA", 7, "#FFD6A3")
+        self.assertEqual(s.get_duration(2026, 1, 15, {15}), 0.0)
+
+    def test_invisible_service(self):
+        s = Service("Hidden", "H", 0, "#000", is_visible=False)
+        self.assertFalse(s.is_visible)
+
+    def test_serialization_roundtrip(self):
+        s = Service("Jour", "J", 12, "#A3D5FF", is_visible=False)
+        data = s.to_dict()
+        s2 = Service(**data)
+        self.assertEqual(s2.name, "Jour")
+        self.assertEqual(s2.id, s.id)
+        self.assertFalse(s2.is_visible)
 
 
+# ================================================================
+# SECTION MODEL
+# ================================================================
+class TestSectionModel(unittest.TestCase):
+    def test_creation(self):
+        sec = Section(id="s1", label="Test Section")
+        self.assertEqual(sec.id, "s1")
+        self.assertEqual(sec.label, "Test Section")
+        self.assertEqual(sec.people_ids, [])
+
+    def test_add_person(self):
+        sec = Section(id="s1", label="Test")
+        sec.add_person("p1")
+        sec.add_person("p2")
+        self.assertEqual(sec.people_ids, ["p1", "p2"])
+
+    def test_add_person_at_index(self):
+        sec = Section(id="s1", label="Test", people_ids=["p1", "p3"])
+        sec.add_person("p2", index=1)
+        self.assertEqual(sec.people_ids, ["p1", "p2", "p3"])
+
+    def test_add_person_deduplicates(self):
+        sec = Section(id="s1", label="Test", people_ids=["p1", "p2", "p3"])
+        sec.add_person("p1", index=2)
+        self.assertEqual(len(sec.people_ids), 3)
+        self.assertEqual(sec.people_ids[2], "p1")
+
+    def test_remove_person(self):
+        sec = Section(id="s1", label="Test", people_ids=["p1", "p2"])
+        self.assertTrue(sec.remove_person("p1"))
+        self.assertEqual(sec.people_ids, ["p2"])
+        self.assertFalse(sec.remove_person("p99"))
+
+    def test_reorder_person(self):
+        sec = Section(id="s1", label="Test", people_ids=["p1", "p2", "p3"])
+        sec.reorder_person("p3", 0)
+        self.assertEqual(sec.people_ids, ["p3", "p1", "p2"])
+
+    def test_sort_alphabetically(self):
+        people = {
+            "p1": Person(prenom="Charlie", nom="Zebra", percentage=100, id="p1"),
+            "p2": Person(prenom="Alice", nom="Apple", percentage=100, id="p2"),
+            "p3": Person(prenom="Bob", nom="Mango", percentage=100, id="p3"),
+        }
+        sec = Section(id="s1", label="Test", people_ids=["p1", "p2", "p3"])
+        sec.sort_people_alphabetically(people)
+        self.assertEqual(sec.people_ids, ["p2", "p3", "p1"])
+
+    def test_serialization_roundtrip(self):
+        sec = Section(id="s1", label="Test", people_ids=["p1", "p2"], is_collapsed=True)
+        data = sec.to_dict()
+        sec2 = Section.from_dict(data)
+        self.assertEqual(sec2.id, "s1")
+        self.assertEqual(sec2.people_ids, ["p1", "p2"])
+        self.assertTrue(sec2.is_collapsed)
+
+
+# ================================================================
+# SCHEMA MODEL
+# ================================================================
 class TestSchemaModel(unittest.TestCase):
-    """Test Schema model functionality."""
-    
-    def test_schema_creation(self):
-        """Test creating a schema."""
-        schema = Schema(
-            name="Week Pattern",
-            start_weekday=0,  # Monday
-            span_days=7
-        )
-        
-        self.assertEqual(schema.name, "Week Pattern")
-        self.assertEqual(schema.start_weekday, 0)
+    def test_creation(self):
+        schema = Schema(name="Week", start_weekday=0, span_days=7)
+        self.assertEqual(schema.name, "Week")
         self.assertEqual(schema.span_days, 7)
         self.assertEqual(len(schema.pattern), 0)
-    
-    def test_schema_set_service(self):
-        """Test setting services in a schema pattern."""
-        schema = Schema("Week Pattern", 0, 7)
-        
-        schema.set_service(0, "service-id-1")
-        schema.set_service(1, "service-id-2")
-        
-        self.assertEqual(schema.get_service(0), "service-id-1")
-        self.assertEqual(schema.get_service(1), "service-id-2")
-        self.assertIsNone(schema.get_service(2))
-    
-    def test_schema_clear_service(self):
-        """Test clearing a service from schema pattern."""
-        schema = Schema("Week Pattern", 0, 7)
-        schema.set_service(0, "service-id-1")
-        
+
+    def test_set_and_get_service(self):
+        schema = Schema("Week", 0, 7)
+        schema.set_service(0, "s1")
+        schema.set_service(1, "s2")
+        self.assertEqual(schema.get_service(0), "s1")
+        self.assertEqual(schema.get_service(1), "s2")
+        self.assertIsNone(schema.get_service(5))
+
+    def test_clear_service(self):
+        schema = Schema("Week", 0, 7)
+        schema.set_service(0, "s1")
         schema.set_service(0, None)
-        
         self.assertIsNone(schema.get_service(0))
-    
-    def test_schema_serialization(self):
-        """Test schema serialization and deserialization."""
-        schema = Schema("Week Pattern", 0, 7)
-        schema.set_service(0, "service-1")
-        schema.set_service(1, "service-2")
-        
+
+    def test_serialization_roundtrip(self):
+        schema = Schema("Week", 0, 7)
+        schema.set_service(0, "s1")
+        schema.set_service(3, "s2")
         data = schema.to_dict()
-        restored = Schema.from_dict(data)
-        
-        self.assertEqual(restored.name, "Week Pattern")
-        self.assertEqual(restored.start_weekday, 0)
-        self.assertEqual(restored.span_days, 7)
-        self.assertEqual(restored.get_service(0), "service-1")
-        self.assertEqual(restored.get_service(1), "service-2")
+        # JSON round-trip (keys become strings)
+        json_str = json.dumps(data)
+        restored_data = json.loads(json_str)
+        restored = Schema.from_dict(restored_data)
+        self.assertEqual(restored.name, "Week")
+        self.assertEqual(restored.get_service(0), "s1")
+        self.assertEqual(restored.get_service(3), "s2")
+        self.assertIsNone(restored.get_service(1))
 
 
+# ================================================================
+# SCHEMA ASSIGNMENT MODEL
+# ================================================================
 class TestSchemaAssignment(unittest.TestCase):
-    """Test SchemaAssignment model functionality."""
-    
-    def test_assignment_always_mode(self):
-        """Test assignment with 'always' repeat mode."""
-        assignment = SchemaAssignment(
-            person_id="person-1",
-            schema_id="schema-1",
-            repeat_mode="always",
-            start_year=2026,
-            start_month=1
-        )
-        
-        # Should apply to current and future months
-        self.assertTrue(assignment.should_apply_to_month(2026, 1))
-        self.assertTrue(assignment.should_apply_to_month(2026, 2))
-        self.assertTrue(assignment.should_apply_to_month(2027, 1))
-        
-        # Should NOT apply to past months
-        self.assertFalse(assignment.should_apply_to_month(2025, 12))
-    
-    def test_assignment_limited_mode(self):
-        """Test assignment with 'limited' repeat mode."""
-        assignment = SchemaAssignment(
-            person_id="person-1",
-            schema_id="schema-1",
-            repeat_mode="limited",
-            repeat_months=3,
-            start_year=2026,
-            start_month=1
-        )
-        
-        # Should apply for 3 months: Jan, Feb, Mar 2026
-        self.assertTrue(assignment.should_apply_to_month(2026, 1))
-        self.assertTrue(assignment.should_apply_to_month(2026, 2))
-        self.assertTrue(assignment.should_apply_to_month(2026, 3))
-        
-        # Should NOT apply after the 3 months
-        self.assertFalse(assignment.should_apply_to_month(2026, 4))
-        self.assertFalse(assignment.should_apply_to_month(2025, 12))
-    
-    def test_assignment_overwrite_flag(self):
-        """Test the overwrite_existing flag."""
-        assignment = SchemaAssignment(
-            person_id="person-1",
-            schema_id="schema-1",
-            overwrite_existing=False
-        )
-        
-        self.assertFalse(assignment.overwrite_existing)
-    
-    def test_assignment_serialization(self):
-        """Test assignment serialization."""
-        assignment = SchemaAssignment(
-            person_id="person-1",
-            schema_id="schema-1",
-            repeat_mode="limited",
-            repeat_months=3,
-            start_year=2026,
-            start_month=1,
-            overwrite_existing=True
-        )
-        
-        data = assignment.to_dict()
+    def test_always_mode(self):
+        sa = SchemaAssignment("p1", "s1", repeat_mode="always", start_year=2026, start_month=1)
+        self.assertTrue(sa.should_apply_to_month(2026, 1))
+        self.assertTrue(sa.should_apply_to_month(2026, 6))
+        self.assertTrue(sa.should_apply_to_month(2027, 1))
+        self.assertFalse(sa.should_apply_to_month(2025, 12))
+
+    def test_limited_mode(self):
+        sa = SchemaAssignment("p1", "s1", repeat_mode="limited", repeat_months=3,
+                              start_year=2026, start_month=1)
+        self.assertTrue(sa.should_apply_to_month(2026, 1))
+        self.assertTrue(sa.should_apply_to_month(2026, 2))
+        self.assertTrue(sa.should_apply_to_month(2026, 3))
+        self.assertFalse(sa.should_apply_to_month(2026, 4))
+        self.assertFalse(sa.should_apply_to_month(2025, 12))
+
+    def test_limited_cross_year(self):
+        sa = SchemaAssignment("p1", "s1", repeat_mode="limited", repeat_months=3,
+                              start_year=2026, start_month=11)
+        self.assertTrue(sa.should_apply_to_month(2026, 11))
+        self.assertTrue(sa.should_apply_to_month(2026, 12))
+        self.assertTrue(sa.should_apply_to_month(2027, 1))
+        self.assertFalse(sa.should_apply_to_month(2027, 2))
+
+    def test_always_no_start_date(self):
+        sa = SchemaAssignment("p1", "s1", repeat_mode="always")
+        self.assertTrue(sa.should_apply_to_month(2020, 1))
+
+    def test_limited_no_start_date(self):
+        sa = SchemaAssignment("p1", "s1", repeat_mode="limited", repeat_months=3)
+        self.assertFalse(sa.should_apply_to_month(2026, 1))
+
+    def test_overwrite_flag(self):
+        sa = SchemaAssignment("p1", "s1", overwrite_existing=False)
+        self.assertFalse(sa.overwrite_existing)
+
+    def test_serialization_roundtrip(self):
+        sa = SchemaAssignment("p1", "s1", repeat_mode="limited", repeat_months=3,
+                              start_year=2026, start_month=1, overwrite_existing=True)
+        data = sa.to_dict()
         restored = SchemaAssignment.from_dict(data)
-        
-        self.assertEqual(restored.person_id, "person-1")
-        self.assertEqual(restored.schema_id, "schema-1")
+        self.assertEqual(restored.person_id, "p1")
         self.assertEqual(restored.repeat_mode, "limited")
         self.assertEqual(restored.repeat_months, 3)
-        self.assertEqual(restored.start_year, 2026)
-        self.assertEqual(restored.start_month, 1)
         self.assertTrue(restored.overwrite_existing)
 
 
+# ================================================================
+# MONTH DATA MODEL
+# ================================================================
 class TestMonthData(unittest.TestCase):
-    """Test MonthData model functionality."""
-    
-    def test_month_creation(self):
-        """Test creating month data."""
-        month = MonthData(2026, 1)
-        
-        self.assertEqual(month.year, 2026)
-        self.assertEqual(month.month, 1)
-        self.assertEqual(len(month.assignments), 0)
-    
-    def test_set_and_get_service(self):
-        """Test setting and getting services."""
-        month = MonthData(2026, 1)
-        
-        month.set_service("person-1", 15, "service-1")
-        
-        self.assertEqual(month.get_service("person-1", 15), "service-1")
-        self.assertIsNone(month.get_service("person-1", 16))
-    
+    def test_creation(self):
+        md = MonthData(2026, 1)
+        self.assertEqual(md.year, 2026)
+        self.assertEqual(md.month, 1)
+
+    def test_set_get_service(self):
+        md = MonthData(2026, 1)
+        md.set_service("p1", 15, "s1")
+        self.assertEqual(md.get_service("p1", 15), "s1")
+        self.assertIsNone(md.get_service("p1", 16))
+        self.assertIsNone(md.get_service("p2", 15))
+
     def test_clear_service(self):
-        """Test clearing a service."""
-        month = MonthData(2026, 1)
-        month.set_service("person-1", 15, "service-1")
-        
-        month.set_service("person-1", 15, None)
-        
-        self.assertIsNone(month.get_service("person-1", 15))
-    
+        md = MonthData(2026, 1)
+        md.set_service("p1", 15, "s1")
+        md.set_service("p1", 15, None)
+        self.assertIsNone(md.get_service("p1", 15))
+
     def test_comments(self):
-        """Test setting and getting comments."""
-        month = MonthData(2026, 1)
-        
-        month.set_comment("person-1", "Test comment")
-        
-        self.assertEqual(month.get_comment("person-1"), "Test comment")
-        self.assertEqual(month.get_comment("person-2"), "")
-    
+        md = MonthData(2026, 1)
+        md.set_comment("p1", "Hello")
+        self.assertEqual(md.get_comment("p1"), "Hello")
+        self.assertEqual(md.get_comment("p2"), "")
+        md.set_comment("p1", "")
+        self.assertEqual(md.get_comment("p1"), "")
+
+    def test_notes(self):
+        md = MonthData(2026, 1)
+        md.set_note("p1", 5, "Note text")
+        self.assertEqual(md.get_note("p1", 5), "Note text")
+        self.assertIsNone(md.get_note("p1", 6))
+        md.set_note("p1", 5, "")
+        self.assertIsNone(md.get_note("p1", 5))
+
+    def test_clearing_service_clears_note(self):
+        md = MonthData(2026, 1)
+        md.set_service("p1", 5, "s1")
+        md.set_note("p1", 5, "Some note")
+        md.set_service("p1", 5, None)
+        self.assertIsNone(md.get_note("p1", 5))
+
     def test_holidays(self):
-        """Test holiday toggling."""
-        month = MonthData(2026, 1)
-        
-        month.toggle_holiday(15)
-        self.assertIn(15, month.holidays)
-        
-        month.toggle_holiday(15)
-        self.assertNotIn(15, month.holidays)
-    
-    def test_month_serialization(self):
-        """Test month data serialization."""
-        month = MonthData(2026, 1)
-        month.set_service("person-1", 15, "service-1")
-        month.set_service("person-2", 16, "service-2")
-        month.set_comment("person-1", "Comment")
-        month.toggle_holiday(25)
-        
-        data = month.to_dict()
-        restored = MonthData.from_dict(data)
-        
+        md = MonthData(2026, 1)
+        md.toggle_holiday(15)
+        self.assertIn(15, md.holidays)
+        md.toggle_holiday(15)
+        self.assertNotIn(15, md.holidays)
+
+    def test_multiple_holidays(self):
+        md = MonthData(2026, 1)
+        md.toggle_holiday(1)
+        md.toggle_holiday(25)
+        self.assertEqual(md.holidays, {1, 25})
+
+    def test_serialization_roundtrip(self):
+        md = MonthData(2026, 3)
+        md.set_service("p1", 15, "s1")
+        md.set_service("p2", 16, "s2")
+        md.set_comment("p1", "Comment")
+        md.set_note("p1", 15, "My note")
+        md.toggle_holiday(25)
+        data = md.to_dict()
+        # Simulate JSON roundtrip
+        json_str = json.dumps(data)
+        restored_data = json.loads(json_str)
+        restored = MonthData.from_dict(restored_data)
         self.assertEqual(restored.year, 2026)
-        self.assertEqual(restored.month, 1)
-        self.assertEqual(restored.get_service("person-1", 15), "service-1")
-        self.assertEqual(restored.get_service("person-2", 16), "service-2")
-        self.assertEqual(restored.get_comment("person-1"), "Comment")
+        self.assertEqual(restored.month, 3)
+        self.assertEqual(restored.get_service("p1", 15), "s1")
+        self.assertEqual(restored.get_service("p2", 16), "s2")
+        self.assertEqual(restored.get_comment("p1"), "Comment")
+        self.assertEqual(restored.get_note("p1", 15), "My note")
         self.assertIn(25, restored.holidays)
 
 
+# ================================================================
+# SCHEDULE CONTROLLER
+# ================================================================
 class TestScheduleController(unittest.TestCase):
-    """Test ScheduleController functionality."""
-    
     def setUp(self):
-        """Set up test fixtures."""
-        self.controller = ScheduleController()
-        
-        # Add test services
-        self.service_day = Service("Jour", "J", 12, "#A3D5FF")
-        self.service_night = Service("Nuit", "N", 12, "#FFD6A3")
-        self.controller.services = [self.service_day, self.service_night]
-        
-        # Add test person
+        self.ctrl = ScheduleController()
+        self.svc_day = Service("Jour", "J", 12, "#A3D5FF")
+        self.svc_night = Service("Nuit", "N", 12, "#FFD6A3")
+        self.ctrl.services = [self.svc_day, self.svc_night]
         self.person = Person("Marie", "Dupont", 100)
-        self.controller.people = [self.person]
-    
+        self.person2 = Person("Alice", "Martin", 80)
+        self.ctrl.people = [self.person, self.person2]
+
     def test_apply_assignment_change(self):
-        """Test applying an assignment change."""
-        self.controller.apply_assignment_change(
-            self.person.id,
-            15,
-            self.service_day.id,
-            2026,
-            1
-        )
-        
-        month_data = self.controller.schedule.get((2026, 1))
-        self.assertIsNotNone(month_data)
-        self.assertEqual(
-            month_data.get_service(self.person.id, 15),
-            self.service_day.id
-        )
-    
+        self.ctrl.apply_assignment_change(self.person.id, 15, self.svc_day.id, 2026, 1)
+        md = self.ctrl.schedule.get((2026, 1))
+        self.assertEqual(md.get_service(self.person.id, 15), self.svc_day.id)
+
     def test_apply_comment_change(self):
-        """Test applying a comment change."""
-        self.controller.apply_comment_change(
-            self.person.id,
-            "Test comment",
-            2026,
-            1
-        )
-        
-        month_data = self.controller.schedule.get((2026, 1))
-        self.assertIsNotNone(month_data)
-        self.assertEqual(
-            month_data.get_comment(self.person.id),
-            "Test comment"
-        )
+        self.ctrl.apply_comment_change(self.person.id, "Test", 2026, 1)
+        md = self.ctrl.schedule.get((2026, 1))
+        self.assertEqual(md.get_comment(self.person.id), "Test")
+
+    def test_get_month_data_creates_if_missing(self):
+        md = self.ctrl.get_month_data(2030, 6)
+        self.assertIsNotNone(md)
+        self.assertEqual(md.year, 2030)
+
+    def test_get_person_by_id(self):
+        self.assertEqual(self.ctrl.get_person_by_id(self.person.id), self.person)
+        self.assertIsNone(self.ctrl.get_person_by_id("nonexistent"))
+
+    def test_get_service_by_id(self):
+        self.assertEqual(self.ctrl.get_service_by_id(self.svc_day.id), self.svc_day)
+        self.assertIsNone(self.ctrl.get_service_by_id("nonexistent"))
+
+    def test_add_recent_file(self):
+        self.ctrl.add_recent_file("file1.mshift")
+        self.ctrl.add_recent_file("file2.mshift")
+        self.assertEqual(self.ctrl.recent_files[0], "file2.mshift")
+        self.assertEqual(len(self.ctrl.recent_files), 2)
+
+    def test_add_recent_file_deduplicates(self):
+        self.ctrl.add_recent_file("file1.mshift")
+        self.ctrl.add_recent_file("file2.mshift")
+        self.ctrl.add_recent_file("file1.mshift")
+        self.assertEqual(self.ctrl.recent_files[0], "file1.mshift")
+        self.assertEqual(len(self.ctrl.recent_files), 2)
+
+    def test_add_recent_file_limit(self):
+        for i in range(10):
+            self.ctrl.add_recent_file(f"file{i}.mshift")
+        self.assertEqual(len(self.ctrl.recent_files), 5)
+
+    def test_add_recent_file_empty(self):
+        self.ctrl.add_recent_file("")
+        self.assertEqual(len(self.ctrl.recent_files), 0)
+
+    def test_ensure_builtin_services(self):
+        self.ctrl.ensure_builtin_services()
+        note_svc = next((s for s in self.ctrl.services if s.id == "builtin_note"), None)
+        self.assertIsNotNone(note_svc)
+        self.assertEqual(self.ctrl.services[-1].id, "builtin_note")
+
+    def test_section_management(self):
+        sec = Section(id="s1", label="Section 1")
+        self.ctrl.sections = [sec]
+        self.person.section_id = "s1"
+        sec.add_person(self.person.id)
+        result = self.ctrl.get_people_in_section("s1")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].id, self.person.id)
+
+    def test_move_person_to_section(self):
+        sec1 = Section(id="s1", label="Sec1", people_ids=[self.person.id])
+        sec2 = Section(id="s2", label="Sec2")
+        self.ctrl.sections = [sec1, sec2]
+        self.person.section_id = "s1"
+        self.ctrl.move_person_to_section(self.person.id, "s2")
+        self.assertEqual(self.person.section_id, "s2")
+        self.assertNotIn(self.person.id, sec1.people_ids)
+        self.assertIn(self.person.id, sec2.people_ids)
+
+    def test_calculate_stats_for_month(self):
+        md = self.ctrl.get_month_data(2026, 1)
+        md.set_service(self.person.id, 1, self.svc_night.id)
+        md.set_service(self.person.id, 2, self.svc_night.id)
+        # 2026-01-03 is Saturday
+        md.set_service(self.person.id, 3, self.svc_day.id)
+        stats = self.ctrl.calculate_stats_for_month(self.person.id, 2026, 1)
+        self.assertEqual(stats["night_count"], 2)
+        sat, sun = stats["weekend_stats"]
+        self.assertEqual(sat, 1)
+
+    def test_apply_schema_to_month(self):
+        schema = Schema("Test", start_weekday=0, span_days=7)
+        schema.set_service(0, self.svc_day.id)  # Monday=Day
+        schema.set_service(1, self.svc_night.id)  # Tuesday=Night
+        self.ctrl.apply_schema_to_month(schema, self.person.id, 2026, 1)
+        md = self.ctrl.get_month_data(2026, 1)
+        # Check that at least some days got services applied
+        has_day = any(md.get_service(self.person.id, d) == self.svc_day.id 
+                      for d in range(1, 32))
+        self.assertTrue(has_day)
+
+    def test_apply_schema_no_overwrite(self):
+        md = self.ctrl.get_month_data(2026, 1)
+        md.set_service(self.person.id, 5, self.svc_night.id)
+        schema = Schema("Test", start_weekday=0, span_days=7)
+        for i in range(7):
+            schema.set_service(i, self.svc_day.id)
+        self.ctrl.apply_schema_to_month(schema, self.person.id, 2026, 1, overwrite=False)
+        # Day 5 should NOT be overwritten
+        self.assertEqual(md.get_service(self.person.id, 5), self.svc_night.id)
+
+    def test_controller_serialization(self):
+        self.ctrl.apply_assignment_change(self.person.id, 10, self.svc_day.id, 2026, 1)
+        self.ctrl.last_year = 2026
+        self.ctrl.last_month = 1
+        data = self.ctrl.to_dict()
+        self.assertIn("people", data)
+        self.assertIn("services", data)
+        self.assertEqual(data["last_year"], 2026)
 
 
-class TestWorkloadCalculator(unittest.TestCase):
-    """Test WorkloadCalculator functionality."""
-    
+# ================================================================
+# RULES ENGINE
+# ================================================================
+class TestRulesEngine(unittest.TestCase):
     def setUp(self):
-        """Set up test fixtures."""
-        # WorkloadCalculator requires main_window, pass None for testing
-        self.calculator = WorkloadCalculator(None)
-        
-        # Create test services
-        self.service_day = Service("Jour", "J", 12, "#A3D5FF")
-        self.service_night = Service("Nuit", "N", 12, "#FFD6A3")
-        self.services = [self.service_day, self.service_night]
-        
-        # Create test person
-        self.person = Person("Marie", "Dupont", 100)
-        
-        # Create month with some assignments
-        self.month_data = MonthData(2026, 1)
-        self.month_data.set_service(self.person.id, 15, self.service_day.id)
-        self.month_data.set_service(self.person.id, 16, self.service_night.id)
-    
-    def test_monthly_summary(self):
-        """Test monthly workload summary calculation."""
-        summary = self.calculator.monthly_summary(
-            self.person,
-            2026,
-            1,
-            {(2026, 1): self.month_data},
-            self.services
-        )
-        
-        # Person worked 2 days * 12h = 24h
-        self.assertEqual(summary.worked, 24.0)
-        
-        # Expected for 100% in January 2026 (31 days): 151h
-        # This is approximate, actual calculation may vary
-        self.assertGreater(summary.expected, 100)
-    
-    def test_status_color_optimal(self):
-        """Test status color for optimal workload."""
-        # Ratio of 1.0 (100%) should be green
-        color = self.calculator.status_color(1.0)
-        self.assertEqual(color, "#90EE90")  # Light green
-    
-    def test_status_color_underwork(self):
-        """Test status color for underwork."""
-        # Ratio of 0.5 (50%) should be blue
-        color = self.calculator.status_color(0.5)
-        self.assertEqual(color, "#ADD8E6")  # Light blue
-    
-    def test_status_color_overwork(self):
-        """Test status color for overwork."""
-        # Ratio of 1.5 (150%) should be red
-        color = self.calculator.status_color(1.5)
-        self.assertEqual(color, "#FFB6C1")  # Light red
+        self.svc_day = Service("Jour", "J", 12, "#A3D5FF")
+        self.svc_night = Service("Nuit", "N", 12, "#FFD6A3")
+        self.services_by_id = {self.svc_day.id: self.svc_day, self.svc_night.id: self.svc_night}
+        self.people = [Person("P", str(i), 100) for i in range(5)]
+
+    def test_no_violations_when_fully_staffed(self):
+        md = MonthData(2026, 1)
+        for d in range(1, 32):
+            for i in range(3):
+                md.set_service(self.people[i].id, d, self.svc_day.id)
+        rule = StaffingRule("Jour", 3, ServiceKind.JOUR)
+        violations = rule.evaluate(md, self.people, self.services_by_id, 2026, 1)
+        self.assertEqual(len(violations), 0)
+
+    def test_missing_violations(self):
+        md = MonthData(2026, 1)
+        # Only 1 person on day shift for day 1
+        md.set_service(self.people[0].id, 1, self.svc_day.id)
+        rule = StaffingRule("Jour", 3, ServiceKind.JOUR)
+        violations = rule.evaluate(md, self.people, self.services_by_id, 2026, 1)
+        day1_viol = [v for v in violations if v.day == 1]
+        self.assertEqual(len(day1_viol), 1)
+        self.assertEqual(day1_viol[0].severity, Severity.MISSING)
+        self.assertEqual(day1_viol[0].count, 1)
+
+    def test_excess_violations(self):
+        md = MonthData(2026, 1)
+        for i in range(5):
+            md.set_service(self.people[i].id, 1, self.svc_day.id)
+        rule = StaffingRule("Jour", 3, ServiceKind.JOUR)
+        violations = rule.evaluate(md, self.people, self.services_by_id, 2026, 1)
+        day1_viol = [v for v in violations if v.day == 1]
+        self.assertEqual(day1_viol[0].severity, Severity.EXCESS)
+
+    def test_violation_tooltip(self):
+        md = MonthData(2026, 1)
+        rule = StaffingRule("Jour", 3, ServiceKind.JOUR)
+        violations = rule.evaluate(md, self.people, self.services_by_id, 2026, 1)
+        self.assertIn("missing", violations[0].tooltip().lower())
+
+    def test_evaluate_rules_combined(self):
+        md = MonthData(2026, 1)
+        violations = evaluate_rules(DEFAULT_RULES, md, self.people, self.services_by_id, 2026, 1)
+        # Should have violations for every day (both Jour and Nuit missing)
+        days_in_jan = 31
+        self.assertEqual(len(violations), days_in_jan * 2)
 
 
+# ================================================================
+# PREFERENCES
+# ================================================================
+class TestPreferences(unittest.TestCase):
+    def test_defaults(self):
+        p = Preferences()
+        self.assertEqual(p.previous_days_shown, 3)
+        self.assertFalse(p.auto_save)
+        self.assertEqual(p.drag_drop_mode, "swap")
+
+    def test_serialization_roundtrip(self):
+        p = Preferences(auto_save=True, row_height=60, column_width=50)
+        data = p.to_dict()
+        p2 = Preferences.from_dict(data)
+        self.assertTrue(p2.auto_save)
+        self.assertEqual(p2.row_height, 60)
+        self.assertEqual(p2.column_width, 50)
+
+    def test_all_fields_preserved(self):
+        p = Preferences()
+        data = p.to_dict()
+        for field in ["previous_days_shown", "auto_save", "paste_overwrite_existing",
+                       "copy_paste_mode", "drag_drop_mode", "row_height", "column_width",
+                       "service_dropdown_display"]:
+            self.assertIn(field, data)
+
+
+# ================================================================
+# UNDO MANAGER
+# ================================================================
+class TestUndoManager(unittest.TestCase):
+    def test_push_and_undo(self):
+        um = UndoManager(max_history=10)
+        action = UndoableAction(name="test", undo_data="old", redo_data="new")
+        um.push(action)
+        self.assertTrue(um.can_undo())
+        undone = um.undo()
+        self.assertEqual(undone.undo_data, "old")
+        self.assertFalse(um.can_undo())
+
+    def test_redo(self):
+        um = UndoManager(max_history=10)
+        um.push(UndoableAction(name="test", undo_data="old", redo_data="new"))
+        um.undo()
+        self.assertTrue(um.can_redo())
+        redone = um.redo()
+        self.assertEqual(redone.redo_data, "new")
+
+    def test_push_clears_redo(self):
+        um = UndoManager(max_history=10)
+        um.push(UndoableAction(name="a1", undo_data="1", redo_data="1"))
+        um.push(UndoableAction(name="a2", undo_data="2", redo_data="2"))
+        um.undo()
+        self.assertTrue(um.can_redo())
+        um.push(UndoableAction(name="a3", undo_data="3", redo_data="3"))
+        self.assertFalse(um.can_redo())
+
+    def test_max_history(self):
+        um = UndoManager(max_history=3)
+        for i in range(10):
+            um.push(UndoableAction(name=f"a{i}", undo_data=i, redo_data=i))
+        self.assertEqual(um.get_history_size(), 3)
+
+    def test_clear(self):
+        um = UndoManager()
+        um.push(UndoableAction(name="test", undo_data="x", redo_data="x"))
+        um.clear()
+        self.assertFalse(um.can_undo())
+
+    def test_descriptions(self):
+        um = UndoManager()
+        um.push(UndoableAction(name="My Action", undo_data="x", redo_data="x"))
+        self.assertEqual(um.get_undo_description(), "My Action")
+        um.undo()
+        self.assertEqual(um.get_redo_description(), "My Action")
+
+    def test_disable_enable(self):
+        um = UndoManager()
+        um.disable()
+        um.push(UndoableAction(name="ignored", undo_data="x", redo_data="x"))
+        self.assertFalse(um.can_undo())
+        um.enable()
+        um.push(UndoableAction(name="recorded", undo_data="x", redo_data="x"))
+        self.assertTrue(um.can_undo())
+
+
+class TestScheduleUndoManager(unittest.TestCase):
+    def test_record_service_change(self):
+        um = ScheduleUndoManager(max_history=10)
+        um.record_service_change(2026, 1, 15, "p1", None, "s1")
+        self.assertTrue(um.can_undo())
+        action = um.undo()
+        self.assertEqual(action.action_type, "service_change")
+
+    def test_record_person_add(self):
+        um = ScheduleUndoManager(max_history=10)
+        um.record_person_add({"id": "p1", "prenom": "Marie", "nom": "Dupont"})
+        self.assertTrue(um.can_undo())
+
+    def test_record_person_delete(self):
+        um = ScheduleUndoManager(max_history=10)
+        um.record_person_delete({"id": "p1", "prenom": "Marie", "nom": "Dupont"})
+        self.assertTrue(um.can_undo())
+
+    def test_record_bulk_service_change(self):
+        um = ScheduleUndoManager(max_history=10)
+        changes = [
+            {"year": 2026, "month": 1, "day": d, "person_id": "p1",
+             "old_service_id": "s1", "new_service_id": None}
+            for d in range(1, 6)
+        ]
+        um.record_bulk_service_change("Clear schedule", changes)
+        self.assertTrue(um.can_undo())
+
+
+# ================================================================
+# FILE I/O
+# ================================================================
 class TestFileOperations(unittest.TestCase):
-    """Test file save/load operations."""
-    
     def setUp(self):
-        """Set up test fixtures."""
         self.temp_file = tempfile.NamedTemporaryFile(
-            mode='w',
-            suffix='.mshift',
-            delete=False
-        )
+            mode='w', suffix='.mshift', delete=False)
         self.temp_file.close()
         self.temp_path = self.temp_file.name
-    
+
     def tearDown(self):
-        """Clean up temporary files."""
         if os.path.exists(self.temp_path):
             os.unlink(self.temp_path)
-    
-    def test_save_and_load_schedule(self):
-        """Test saving and loading a complete schedule."""
+        # Clean up any backups
+        base = os.path.splitext(self.temp_path)[0]
+        import glob
+        for f in glob.glob(f"{base}_backup_*"):
+            os.unlink(f)
+
+    def test_save_and_load_roundtrip(self):
         from file_io import save_schedule, load_schedule
-        
-        # Create controller with test data
-        controller = ScheduleController()
-        service = Service("Jour", "J", 12, "#A3D5FF")
+        ctrl = ScheduleController()
+        svc = Service("Jour", "J", 12, "#A3D5FF")
         person = Person("Marie", "Dupont", 100)
-        controller.services = [service]
-        controller.people = [person]
-        
-        # Add some schedule data
-        controller.apply_assignment_change(person.id, 15, service.id, 2026, 1)
-        
-        # Save to file
-        save_schedule(controller, self.temp_path)
-        
-        # Load into new controller
-        new_controller = ScheduleController()
-        load_schedule(new_controller, self.temp_path)
-        
-        # Verify data was preserved (note: controller may have default services)
-        self.assertGreaterEqual(len(new_controller.services), 1)
-        self.assertEqual(len(new_controller.people), 1)
-        
-        # Find our test service
-        test_service = next((s for s in new_controller.services if s.name == "Jour"), None)
-        self.assertIsNotNone(test_service)
-        self.assertEqual(test_service.short_name, "J")
-        
-        self.assertEqual(new_controller.people[0].prenom, "Marie")
-        
-        # Verify schedule data
-        month_data = new_controller.schedule.get((2026, 1))
-        self.assertIsNotNone(month_data)
+        ctrl.services = [svc]
+        ctrl.people = [person]
+        ctrl.sections = [Section(id="s1", label="Test", people_ids=[person.id])]
+        ctrl.apply_assignment_change(person.id, 15, svc.id, 2026, 1)
+        save_schedule(ctrl, self.temp_path)
+
+        ctrl2 = ScheduleController()
+        load_schedule(ctrl2, self.temp_path)
+        self.assertEqual(len(ctrl2.people), 1)
+        self.assertEqual(ctrl2.people[0].prenom, "Marie")
+        test_svc = next((s for s in ctrl2.services if s.name == "Jour"), None)
+        self.assertIsNotNone(test_svc)
+        md = ctrl2.schedule.get((2026, 1))
+        self.assertIsNotNone(md)
+
+    def test_save_creates_file(self):
+        from file_io import save_schedule
+        if os.path.exists(self.temp_path):
+            os.unlink(self.temp_path)
+        ctrl = ScheduleController()
+        save_schedule(ctrl, self.temp_path)
+        self.assertTrue(os.path.exists(self.temp_path))
+
+    def test_saved_file_is_valid_json(self):
+        from file_io import save_schedule
+        ctrl = ScheduleController()
+        save_schedule(ctrl, self.temp_path)
+        with open(self.temp_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        self.assertIn("people", data)
+        self.assertIn("services", data)
+        self.assertIn("schedule", data)
+
+    def test_load_preserves_schedule_data(self):
+        from file_io import save_schedule, load_schedule
+        ctrl = ScheduleController()
+        svc = Service("Nuit", "N", 12, "#FFD6A3")
+        person = Person("Bob", "Test", 50)
+        ctrl.services = [svc]
+        ctrl.people = [person]
+        ctrl.sections = [Section(id="s1", label="S1", people_ids=[person.id])]
+        md = ctrl.get_month_data(2026, 3)
+        md.set_service(person.id, 10, svc.id)
+        md.set_comment(person.id, "Test comment")
+        md.toggle_holiday(25)
+        save_schedule(ctrl, self.temp_path)
+
+        ctrl2 = ScheduleController()
+        load_schedule(ctrl2, self.temp_path)
+        md2 = ctrl2.schedule.get((2026, 3))
+        self.assertIsNotNone(md2)
+        self.assertEqual(md2.get_comment(person.id), "Test comment")
+        self.assertIn(25, md2.holidays)
 
 
+# ================================================================
+# TEST RUNNER
+# ================================================================
 def run_tests():
-    """Run all tests with detailed output."""
     print("=" * 70)
     print("Running MShift Test Suite")
     print("=" * 70)
     print()
-    
-    # Create test suite
+
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
-    
-    # Add all test classes
-    suite.addTests(loader.loadTestsFromTestCase(TestPersonModel))
-    suite.addTests(loader.loadTestsFromTestCase(TestServiceModel))
-    suite.addTests(loader.loadTestsFromTestCase(TestSchemaModel))
-    suite.addTests(loader.loadTestsFromTestCase(TestSchemaAssignment))
-    suite.addTests(loader.loadTestsFromTestCase(TestMonthData))
-    suite.addTests(loader.loadTestsFromTestCase(TestScheduleController))
-   # suite.addTests(loader.loadTestsFromTestCase(TestWorkloadCalculator))  # Requires GUI integration
-    suite.addTests(loader.loadTestsFromTestCase(TestFileOperations))
-    
-    # Run tests
+
+    test_classes = [
+        TestPersonModel,
+        TestServiceModel,
+        TestSectionModel,
+        TestSchemaModel,
+        TestSchemaAssignment,
+        TestMonthData,
+        TestScheduleController,
+        TestRulesEngine,
+        TestPreferences,
+        TestUndoManager,
+        TestScheduleUndoManager,
+        TestFileOperations,
+    ]
+
+    for cls in test_classes:
+        suite.addTests(loader.loadTestsFromTestCase(cls))
+
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
-    
-    # Print summary
+
     print()
     print("=" * 70)
     print("Test Summary")
@@ -520,7 +757,7 @@ def run_tests():
     print(f"Successes: {result.testsRun - len(result.failures) - len(result.errors)}")
     print(f"Failures: {len(result.failures)}")
     print(f"Errors: {len(result.errors)}")
-    
+
     if result.wasSuccessful():
         print()
         print("[PASS] ALL TESTS PASSED!")

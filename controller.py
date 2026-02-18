@@ -39,6 +39,22 @@ class ScheduleController:
         # But ensure_builtin_services appends if missing.
         self.ensure_builtin_services()
 
+    def add_recent_file(self, file_path: str):
+        """Add a file to the recent files list, maintaining order and uniqueness."""
+        if not file_path:
+            return
+            
+        # Remove if exists
+        if file_path in self.recent_files:
+            self.recent_files.remove(file_path)
+            
+        # Add to top
+        self.recent_files.insert(0, file_path)
+        
+        # Limit to 5
+        while len(self.recent_files) > 5:
+            self.recent_files.pop()
+
     def to_dict(self) -> dict:
         """Serializes current app state for persistence."""
         return {

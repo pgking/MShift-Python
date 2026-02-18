@@ -7,6 +7,11 @@ import os
 import sys
 import calendar
 import json
+import ctypes
+
+# Set App User Model ID for Windows Taskbar Icon
+myappid = 'mshift.midwife.scheduler.1.0' # arbitrary string
+ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
 # Qt
 from PyQt5.QtWidgets import (
@@ -31,7 +36,10 @@ from PyQt5.QtCore import (
 from PyQt5.QtGui import (
     QColor,
     QBrush,
-    QFont
+    QFont,
+    QIcon,
+    QPixmap,
+    QPainter
 )
 
 
@@ -55,7 +63,7 @@ from copy_paste_handler import CopyPasteHandler
 from dev_seed import load_dev_data
 from migration import rebuild_rows_from_sections
 
-VERSION = "1.0.9"
+VERSION = "1.0.11"
 
 # ============================================================
 # Constants
@@ -72,6 +80,19 @@ ZOOM_MIN = 0.5
 ZOOM_MAX = 2.0
 ZOOM_DEFAULT = 1.0
 
+# Splash
+SPLASH_DURATION_MS = 2500     # Duration of the splash screen in milliseconds
+
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 # ============================================================
 # 2. Main Window
@@ -80,6 +101,11 @@ ZOOM_DEFAULT = 1.0
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        # Set Window Icon
+        icon_path = resource_path("logo.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         # =====================================================
         # 1. WINDOW & MENU (pure UI shell, no state)
@@ -179,16 +205,31 @@ class MainWindow(QMainWindow):
                 load_dev_data(self)
 
         # =====================================================
-        # 8b. AUTO-LOAD LAST FILE
+        # 8b. AUTO-LOAD LAST FILE  OR  COMMAND LINE ARG
         # =====================================================
-        if self.controller.recent_files:
+        file_to_load = None
+        
+        # Check command line argument first (e.g. "Open With" or Double Click)
+        if len(sys.argv) > 1:
+            potential_file = sys.argv[1]
+            if os.path.exists(potential_file) and potential_file.endswith(".mshift"):
+                 file_to_load = potential_file
+
+        # Fallback to recent files
+        if not file_to_load and self.controller.recent_files:
             last_file = self.controller.recent_files[0]
             if os.path.exists(last_file):
-                print(f"Auto-loading last file: {last_file}")
-                load_schedule(self.controller, last_file)
-                self.rebuild_rows_from_sections()  # Rebuild rows from loaded sections
-                self.current_file_path = last_file
-                self.last_file_mtime = os.path.getmtime(last_file)
+                file_to_load = last_file
+
+        if file_to_load:
+            print(f"Auto-loading file: {file_to_load}")
+            load_schedule(self.controller, file_to_load)
+            self.rebuild_rows_from_sections()  # Rebuild rows from loaded sections
+            self.current_file_path = file_to_load
+            self.last_file_mtime = os.path.getmtime(file_to_load)
+            
+            # Update menu to move this file to top of recent list
+            self.controller.add_recent_file(file_to_load)
 
         self.installEventFilter(self)
         self.finalize_table_setup()
@@ -586,7 +627,110 @@ class MainWindow(QMainWindow):
     # 6. ASSIGNMENT LOGIC
     # =====================================================
     def clear_person_schedule_month(self, person_id, year, month):
-        """Clear all assignments for a person in a specific month."""
+        """Clear all assignments for a person in a specific month, and split schemas if needed."""
+        
+        # =========================================================
+        # PART 1: Handle Schema Assignments (Punch a hole)
+        # =========================================================
+        # Check for active schema assignments for this month
+        current_assignments = [
+            sa for sa in self.controller.schema_assignments 
+            if sa.person_id == person_id and sa.should_apply_to_month(year, month)
+        ]
+
+        if current_assignments:
+            old_assignments_state = [sa.to_dict() for sa in self.controller.get_assignments_for_person(person_id)]
+            new_assignments = [sa for sa in self.controller.schema_assignments if sa.person_id != person_id]
+            
+            # For each assignment covering this month, modify it
+            target_period = year * 12 + month
+            
+            for sa in current_assignments:
+                # Calculate start period index
+                start_p = sa.start_year * 12 + sa.start_month
+                
+                # If it starts THIS month
+                if start_p == target_period:
+                    # Move start to next month
+                    # If repeat was 1, just delete it (don't add back)
+                    if sa.repeat_mode == "limited":
+                        if sa.repeat_months > 1:
+                            sa.repeat_months -= 1
+                            if month == 12:
+                                sa.start_year += 1
+                                sa.start_month = 1
+                            else:
+                                sa.start_month += 1
+                            new_assignments.append(sa)
+                    else: # always
+                         if month == 12:
+                            sa.start_year += 1
+                            sa.start_month = 1
+                         else:
+                            sa.start_month += 1
+                         new_assignments.append(sa)
+                
+                # If it started BEFORE this month
+                elif start_p < target_period:
+                    # Split into:
+                    # 1. First part ending last month
+                    # 2. Second part starting next month (if it extends beyond)
+                    
+                    months_before = target_period - start_p
+                    
+                    # Part 1 (Pre-split)
+                    part1 = SchemaAssignment(**sa.to_dict())
+                    part1.repeat_mode = "limited"
+                    part1.repeat_months = months_before
+                    new_assignments.append(part1)
+                    
+                    # Part 2 (Post-split)
+                    has_future = False
+                    if sa.repeat_mode == "always":
+                        has_future = True
+                    elif sa.repeat_mode == "limited":
+                        total_months = sa.repeat_months
+                        if total_months > months_before + 1:
+                            has_future = True
+                            
+                    if has_future:
+                        part2 = SchemaAssignment(**sa.to_dict())
+                        if month == 12:
+                            part2.start_year = year + 1
+                            part2.start_month = 1
+                        else:
+                            part2.start_year = year
+                            part2.start_month = month + 1
+                            
+                        if sa.repeat_mode == "limited":
+                            part2.repeat_months = sa.repeat_months - (months_before + 1)
+                            
+                        new_assignments.append(part2)
+
+            # Re-add other unaffected assignments for this person
+            unaffected = [
+                sa for sa in self.controller.schema_assignments 
+                if sa.person_id == person_id and sa not in current_assignments
+            ]
+            new_assignments.extend(unaffected)
+            
+            # Apply changes to controller
+            self.controller.schema_assignments = new_assignments
+            
+            # Record Undo for schema change
+            person = self.controller.get_person_by_id(person_id)
+            name = person.display_name if person else "Person"
+            new_assignments_state = [sa.to_dict() for sa in self.controller.get_assignments_for_person(person_id)]
+            
+            self.controller.undo_manager.record_schema_assignment_change(
+                f"Split schema for {name} (clearing {month}/{year})",
+                old_assignments_state,
+                new_assignments_state
+            )
+
+        # =========================================================
+        # PART 2: Clear actual cells
+        # =========================================================
         month_data = self.controller.get_month_data(year, month)
         days_in_month = calendar.monthrange(year, month)[1]
         
@@ -604,6 +748,11 @@ class MainWindow(QMainWindow):
                 })
         
         if not changes:
+            # If we changed schema but no cells changed (cells were already empty?), we still need to refresh?
+            # Yes, finalized_table_setup handles reapplying.
+            # But we should ensure UI updates.
+            if current_assignments:
+                self.finalize_table_setup()
             return
             
         # Record undo
@@ -1859,10 +2008,74 @@ class MainWindow(QMainWindow):
 # 16. APP ENTRY POINT
 # =====================================================
 
+def _build_splash_pixmap():
+    """
+    Build a polished splash screen pixmap with the logo centered
+    on a dark background, with app name and version text.
+    """
+    splash_w, splash_h = 480, 400
+    pixmap = QPixmap(splash_w, splash_h)
+    pixmap.fill(QColor(30, 30, 40))  # Dark background
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setRenderHint(QPainter.SmoothPixmapTransform)
+
+    # Load and draw logo (centered, scaled to ~200px)
+    logo_path = resource_path("logo.png")
+    if os.path.exists(logo_path):
+        logo = QPixmap(logo_path)
+        logo_size = 200
+        scaled = logo.scaled(
+            logo_size, logo_size,
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+        x = (splash_w - scaled.width()) // 2
+        y = 50
+        painter.drawPixmap(x, y, scaled)
+
+    # App name
+    font = QFont("Segoe UI", 22, QFont.Bold)
+    painter.setFont(font)
+    painter.setPen(QColor(255, 255, 255))
+    painter.drawText(0, 280, splash_w, 40, Qt.AlignCenter, "MShift")
+
+    # Subtitle
+    font2 = QFont("Segoe UI", 11)
+    painter.setFont(font2)
+    painter.setPen(QColor(180, 180, 200))
+    painter.drawText(0, 320, splash_w, 30, Qt.AlignCenter, "Midwife Scheduler")
+
+    # Version
+    font3 = QFont("Segoe UI", 9)
+    painter.setFont(font3)
+    painter.setPen(QColor(120, 120, 140))
+    painter.drawText(0, 360, splash_w, 25, Qt.AlignCenter, f"v{VERSION}")
+
+    painter.end()
+    return pixmap
+
+
 def main():
     app = QApplication(sys.argv)
+
+    # --- Splash Screen ---
+    splash_pixmap = _build_splash_pixmap()
+    from PyQt5.QtWidgets import QSplashScreen
+    splash = QSplashScreen(splash_pixmap)
+    splash.show()
+    app.processEvents()
+
+    # Build the main window while the splash is visible
     window = MainWindow()
-    window.show()
+
+    # Close splash and show main window after delay
+    QTimer.singleShot(SPLASH_DURATION_MS, lambda: (
+        splash.finish(window),
+        window.show()
+    ))
+
     sys.exit(app.exec_())
 
 if __name__ == "__main__":

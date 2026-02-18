@@ -469,9 +469,107 @@ class PreferencesDialog(QDialog):
         self.auto_save_checkbox.setChecked(self.preferences.auto_save)
         layout.addWidget(self.auto_save_checkbox)
 
-        layout.addStretch()
+        layout.addSpacing(20)
 
+        # File association
+        file_assoc_group = QWidget()
+        file_assoc_layout = QHBoxLayout(file_assoc_group)
+        file_assoc_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.register_ext_btn = QPushButton("Register .mshift file icon")
+        self.register_ext_btn.setToolTip("Fixes the file icon in Windows Explorer for .mshift files")
+        self.register_ext_btn.clicked.connect(self._register_file_extension)
+        
+        file_assoc_layout.addWidget(self.register_ext_btn)
+        file_assoc_layout.addStretch()
+        
+        layout.addWidget(file_assoc_group)
+
+        layout.addStretch()
+        
         self._add_page(page)
+
+    def _register_file_extension(self):
+        r"""
+        Registers .mshift extension in HKCU\Software\Classes.
+        Does not require admin rights.
+        """
+        import sys
+        import os
+        import winreg
+        from PyQt5.QtWidgets import QMessageBox
+
+        try:
+            # Detect executable path
+            if getattr(sys, 'frozen', False):
+                # Running as compiled exe
+                exe_path = sys.executable
+                icon_path = exe_path + ",0" # Use the exe icon resource
+            else:
+                # Running as script — exe_path used for display only
+                exe_path = sys.executable
+
+                # Check for logo.ico
+                if os.path.exists("logo.ico"):
+                    icon_path = os.path.abspath("logo.ico")
+                else:
+                    icon_path = "" # No icon
+            
+            # Application identifier
+            prog_id = "MShiftSchedule"
+            file_ext = ".mshift"
+            file_type_name = "MShift Schedule"
+            
+            # 1. HKEY_CURRENT_USER\Software\Classes\.mshift
+            #    (Default) = MShiftSchedule
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{file_ext}") as key:
+                winreg.SetValue(key, "", winreg.REG_SZ, prog_id)
+                
+            # 2. HKEY_CURRENT_USER\Software\Classes\MShiftSchedule
+            #    (Default) = MShift Schedule
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{prog_id}") as key:
+                winreg.SetValue(key, "", winreg.REG_SZ, file_type_name)
+                
+                # DefaultIcon
+                if icon_path:
+                    with winreg.CreateKey(key, "DefaultIcon") as icon_key:
+                        winreg.SetValue(icon_key, "", winreg.REG_SZ, icon_path)
+            
+            # 3. Command
+            #    shell\open\command
+            command_key_path = f"Software\\Classes\\{prog_id}\\shell\\open\\command"
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, command_key_path) as key:
+                if getattr(sys, 'frozen', False):
+                    cmd = f'"{exe_path}" "%1"'
+                else:
+                    # For dev mode, use the script path
+                    script = os.path.abspath("main.py")
+                    python_exe = sys.executable
+                    
+                    # Try to find pythonw.exe (no console)
+                    python_w = python_exe.replace("python.exe", "pythonw.exe")
+                    if os.path.exists(python_w):
+                        python_exe = python_w
+                        
+                    cmd = f'"{python_exe}" "{script}" "%1"'
+                
+                winreg.SetValue(key, "", winreg.REG_SZ, cmd)
+                
+            # Notify Windows of changes
+            try:
+                import ctypes
+                ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, 0, 0) # SHCNE_ASSOCCHANGED
+            except Exception:
+                pass
+
+            QMessageBox.information(
+                self, 
+                "Success", 
+                f"File association registered successfully!\n\n.mshift files will now open with:\n{exe_path}\n(No Console window should appear)"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to register extension:\n{str(e)}")
 
     def _build_behavior_page(self):
         page = QWidget()
