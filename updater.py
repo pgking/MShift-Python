@@ -1,12 +1,22 @@
 import os
 import sys
 import json
+import ssl
 import urllib.request
 import zipfile
 import tempfile
 import subprocess
 from PyQt5.QtWidgets import QMessageBox, QProgressDialog
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
+
+def _get_ssl_context():
+    """Create an SSL context that works in PyInstaller builds."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        # certifi not installed — use default context (works in dev mode)
+        return ssl.create_default_context()
 
 OWNER = "pgking"
 REPO = "MShift-Python"
@@ -40,7 +50,8 @@ class CheckUpdateThread(QThread):
         try:
             req = urllib.request.Request(url)
             req.add_header('User-Agent', 'mshift-updater')
-            with urllib.request.urlopen(req, timeout=10) as response:
+            ctx = _get_ssl_context()
+            with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
                 if response.getcode() == 200:
                     data = json.load(response)
                     self.finished.emit(data, "")
@@ -70,8 +81,10 @@ class DownloadThread(QThread):
             temp_dir = tempfile.gettempdir()
             target_path = os.path.join(temp_dir, "mshift_update.zip")
             
-            # Use build_opener to ensure User-Agent headers for asset download
-            opener = urllib.request.build_opener()
+            # Use build_opener with SSL context for asset download
+            ctx = _get_ssl_context()
+            https_handler = urllib.request.HTTPSHandler(context=ctx)
+            opener = urllib.request.build_opener(https_handler)
             opener.addheaders = [('User-agent', 'mshift-updater')]
             urllib.request.install_opener(opener)
 
