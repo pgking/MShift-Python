@@ -318,6 +318,9 @@ class ScheduleController:
         month_data = self.get_month_data(year, month)
         days_in_month = cal.monthrange(year, month)[1]
         
+        # Check if we should skip holidays
+        skip_holidays = self.preferences.schemas_skip_holidays
+        
         # Determine the anchor date based on assignment start
         if start_period:
             start_year, start_month = start_period
@@ -348,6 +351,10 @@ class ScheduleController:
 
         # 3. Apply pattern to the requested month
         for day in range(1, days_in_month + 1):
+            # Skip holidays if preference is enabled
+            if skip_holidays and day in month_data.holidays:
+                continue
+            
             current_date = date(year, month, day)
             
             # Calculate days since the anchor date

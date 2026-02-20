@@ -20,6 +20,9 @@ class Preferences:
     column_width: int = 40
     service_dropdown_display: str = "short"  # "short" | "full"
 
+    # Schema behavior
+    schemas_skip_holidays: bool = True  # If True, schemas won't fill holiday days
+
     def to_dict(self):
         return self.__dict__.copy()
 

@@ -206,7 +206,10 @@ class ColoredVerticalHeader(QHeaderView):
             new_assignments_state
         )
         
-        # 5. Apply the schema immediately for the current month (and trigger refresh)
+        # 5. Apply the schema immediately
+        self.main_window.controller.apply_assignment(new_assignment)
+        
+        # 6. Refresh UI
         self.main_window.finalize_table_setup()
 
     def _clear_person_schedule_month(self, person):

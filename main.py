@@ -63,7 +63,7 @@ from copy_paste_handler import CopyPasteHandler
 from dev_seed import load_dev_data
 from migration import rebuild_rows_from_sections
 
-VERSION = "1.0.12"
+VERSION = "1.0.13"
 
 # ============================================================
 # Constants
@@ -579,11 +579,6 @@ class MainWindow(QMainWindow):
     # 5. TABLE STRUCTURE & PROJECTION
     # =====================================================
     def finalize_table_setup(self):
-        # Auto-apply schemas for this month
-        year = int(self.year_combo.currentText())
-        month = self.month_combo.currentIndex() + 1
-        self.controller.auto_apply_schemas(year, month)
-        
         self.table_rebuilder.finalize()
         
         self.recompute_current_month_violations()

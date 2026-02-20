@@ -427,6 +427,10 @@ class PreferencesDialog(QDialog):
             self.auto_save_checkbox.isChecked()
         )
 
+        self.preferences.schemas_skip_holidays = (
+            self.schemas_skip_holidays_checkbox.isChecked()
+        )
+
         if self.copy_linked_radio.isChecked():
             self.preferences.copy_paste_mode = "linked"
         else:
@@ -468,6 +472,16 @@ class PreferencesDialog(QDialog):
         self.auto_save_checkbox.setToolTip("Automatically saves the schedule to disk every time you make a change.")
         self.auto_save_checkbox.setChecked(self.preferences.auto_save)
         layout.addWidget(self.auto_save_checkbox)
+
+        layout.addSpacing(20)
+
+        # Schema holiday behavior
+        self.schemas_skip_holidays_checkbox = QCheckBox("Les schémas ne s'appliquent pas aux jours fériés")
+        self.schemas_skip_holidays_checkbox.setToolTip(
+            "Quand activé, l'application d'un schéma ignorera les jours marqués comme fériés."
+        )
+        self.schemas_skip_holidays_checkbox.setChecked(self.preferences.schemas_skip_holidays)
+        layout.addWidget(self.schemas_skip_holidays_checkbox)
 
         layout.addSpacing(20)
 

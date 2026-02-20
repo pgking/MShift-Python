@@ -201,9 +201,16 @@ def validate_and_sanitize(data: Dict[str, Any]) -> Dict[str, Any]:
     Raises:
         ValidationError: If validation fails
     """
-    # First validate the structure
+    # Apply sanitization / migrations for backward compatibility BEFORE validation
+    if "schedule" in data and isinstance(data["schedule"], dict):
+        for key, month_data in data["schedule"].items():
+            if isinstance(month_data, dict):
+                # Migration: add missing 'holidays' field (added after initial release)
+                if "holidays" not in month_data:
+                    month_data["holidays"] = []
+
+    # Validate the structure
     validate_schedule_file(data)
     
-    # Apply any sanitization or migrations here
-    # For now, just return the validated data
+    # Return the validated data
     return data
