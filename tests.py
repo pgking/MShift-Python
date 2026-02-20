@@ -723,6 +723,75 @@ class TestFileOperations(unittest.TestCase):
 
 
 # ================================================================
+# BUILD SAFETY
+# ================================================================
+class TestBuildSafety(unittest.TestCase):
+    """
+    Ensures that dev-only modules are never imported at the top level
+    in production files. This prevents the built exe from crashing on
+    launch due to missing modules that were excluded from the build.
+    """
+
+    # Modules that are excluded from the PyInstaller build
+    DEV_ONLY_MODULES = {"dev_seed", "tests"}
+
+    # Files that are themselves dev-only (don't need to be checked)
+    DEV_ONLY_FILES = {"tests.py", "dev_seed.py"}
+
+    def test_no_toplevel_dev_imports(self):
+        """Check that no production .py file has a top-level import of a dev-only module."""
+        import ast
+        import glob
+
+        project_dir = os.path.dirname(os.path.abspath(__file__))
+        py_files = glob.glob(os.path.join(project_dir, "*.py"))
+
+        violations = []
+
+        for filepath in py_files:
+            filename = os.path.basename(filepath)
+            if filename in self.DEV_ONLY_FILES:
+                continue
+
+            with open(filepath, "r", encoding="utf-8") as f:
+                try:
+                    tree = ast.parse(f.read(), filename=filename)
+                except SyntaxError:
+                    continue
+
+            for node in ast.iter_child_nodes(tree):
+                # Check 'import X' statements
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        module_root = alias.name.split(".")[0]
+                        if module_root in self.DEV_ONLY_MODULES:
+                            violations.append(
+                                f"{filename}:{node.lineno} - "
+                                f"top-level 'import {alias.name}' "
+                                f"(dev-only module)"
+                            )
+
+                # Check 'from X import Y' statements
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module:
+                        module_root = node.module.split(".")[0]
+                        if module_root in self.DEV_ONLY_MODULES:
+                            violations.append(
+                                f"{filename}:{node.lineno} - "
+                                f"top-level 'from {node.module} import ...' "
+                                f"(dev-only module)"
+                            )
+
+        if violations:
+            msg = (
+                "Dev-only modules imported at top level in production files!\n"
+                "These will crash the built exe. Move them inside conditional blocks.\n\n"
+                + "\n".join(f"  ❌ {v}" for v in violations)
+            )
+            self.fail(msg)
+
+
+# ================================================================
 # TEST RUNNER
 # ================================================================
 def run_tests():
@@ -747,6 +816,7 @@ def run_tests():
         TestUndoManager,
         TestScheduleUndoManager,
         TestFileOperations,
+        TestBuildSafety,
     ]
 
     for cls in test_classes:

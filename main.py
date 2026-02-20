@@ -60,7 +60,6 @@ from updater import UpdateManager
 from ui_setup import setup_main_window_ui
 from drag_drop_handler import DragDropHandler
 from copy_paste_handler import CopyPasteHandler
-from dev_seed import load_dev_data
 from migration import rebuild_rows_from_sections
 
 VERSION = "1.0.13"
@@ -202,6 +201,7 @@ class MainWindow(QMainWindow):
             DEV_MODE = os.getenv("MSHIFT_DEV_MODE", "").lower() in ("1", "true", "yes")
             
             if DEV_MODE:
+                from dev_seed import load_dev_data
                 load_dev_data(self)
 
         # =====================================================
