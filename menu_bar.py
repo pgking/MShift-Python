@@ -62,13 +62,13 @@ class MenuBar(QMenuBar):
         new_action.setShortcut(QKeySequence.New)
         new_action.triggered.connect(self.parent.new_file)
 
-        save_action = QAction("Save…", self)
+        save_action = QAction("Save", self)
         save_action.setShortcut(QKeySequence.Save)
-        save_action.triggered.connect(self.parent.save_file)
+        save_action.triggered.connect(self.parent.quick_save)
 
-        quick_save_action = QAction("Quick Save", self)
-        quick_save_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
-        quick_save_action.triggered.connect(self.parent.quick_save)
+        save_as_action = QAction("Save As…", self)
+        save_as_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        save_as_action.triggered.connect(self.parent.save_file)
 
         load_action = QAction("Load…", self)
         load_action.setShortcut(QKeySequence.Open)
@@ -94,7 +94,7 @@ class MenuBar(QMenuBar):
         file_menu.addAction(new_action)
         file_menu.addSeparator()
         file_menu.addAction(save_action)
-        file_menu.addAction(quick_save_action)
+        file_menu.addAction(save_as_action)
         file_menu.addSeparator()
         file_menu.addAction(load_action)
         file_menu.addMenu(self.recent_menu)
