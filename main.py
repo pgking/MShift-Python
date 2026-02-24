@@ -62,7 +62,7 @@ from drag_drop_handler import DragDropHandler
 from copy_paste_handler import CopyPasteHandler
 from migration import rebuild_rows_from_sections
 
-VERSION = "1.0.14"
+VERSION = "1.0.15"
 
 # ============================================================
 # Constants

@@ -19,6 +19,30 @@ if ($versionLine -match 'VERSION = "(.+)"') {
 }
 Write-Host ""
 
+# Check if a zip with this version already exists
+$existingZip = "dist\MShift-v$VERSION.zip"
+if (Test-Path $existingZip) {
+    $zipTime = (Get-Item $existingZip).LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
+    Write-Host "[!] A build with version $VERSION already exists!" -ForegroundColor Yellow
+    Write-Host "    File: $existingZip" -ForegroundColor Gray
+    Write-Host "    Created: $zipTime" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  [R] Replace - Delete existing zip and rebuild with same version" -ForegroundColor Cyan
+    Write-Host "  [S] Stop    - Abort so you can update VERSION in main.py" -ForegroundColor Cyan
+    Write-Host ""
+    $choice = Read-Host "Choose [R/S]"
+    if ($choice -eq "R" -or $choice -eq "r") {
+        Write-Host ""
+        Write-Host "Continuing with version $VERSION (existing zip will be replaced)..." -ForegroundColor Yellow
+    } else {
+        Write-Host ""
+        Write-Host "Build aborted. Update VERSION in main.py and try again." -ForegroundColor Red
+        Write-Host ""
+        exit 0
+    }
+    Write-Host ""
+}
+
 # Check if build_env exists
 if (-not (Test-Path "build_env\Scripts\Activate.ps1")) {
     Write-Host "[X] build_env not found!" -ForegroundColor Red
