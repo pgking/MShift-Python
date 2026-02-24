@@ -13,6 +13,10 @@ class AppState:
         return os.path.join(base, "app_state.json")
     
     def save_app_state(self, data: dict):
+        if not isinstance(data, dict):
+            print(f"[AppState] WARNING: save_app_state received {type(data).__name__} instead of dict. Skipping save.")
+            return
+        
         path = self.get_app_state_path()
 
         with open(path, 'w', encoding='utf-8') as f:
@@ -23,5 +27,14 @@ class AppState:
         if not os.path.exists(path):
             return None
 
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if not isinstance(data, dict):
+                    print(f"[AppState] WARNING: app_state.json contains {type(data).__name__} instead of dict. Ignoring.")
+                    return None
+                return data
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"[AppState] WARNING: app_state.json is corrupted or empty ({e}). Starting fresh.")
+            return None
+

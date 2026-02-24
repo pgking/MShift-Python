@@ -792,6 +792,211 @@ class TestBuildSafety(unittest.TestCase):
 
 
 # ================================================================
+# APP STATE PERSISTENCE
+# ================================================================
+class TestAppState(unittest.TestCase):
+    """
+    Tests for the AppState class that manages app_state.json.
+    This was completely untested and led to a bug where passing a
+    non-dict to save_app_state corrupted the file, preventing launch.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.temp_path = os.path.join(self.temp_dir, "app_state.json")
+        
+        # Create a patched AppState that uses our temp path
+        from app_state import AppState
+        self.app_state = AppState()
+        self.app_state.get_app_state_path = lambda: self.temp_path
+
+    def tearDown(self):
+        if os.path.exists(self.temp_path):
+            os.unlink(self.temp_path)
+        os.rmdir(self.temp_dir)
+
+    def test_save_and_load_roundtrip(self):
+        """Basic save then load should return identical data."""
+        data = {"people": [{"name": "Marie"}], "services": [], "last_year": 2026}
+        self.app_state.save_app_state(data)
+        loaded = self.app_state.load_app_state()
+        self.assertEqual(loaded, data)
+
+    def test_load_returns_none_when_no_file(self):
+        """load_app_state should return None if file doesn't exist."""
+        self.assertIsNone(self.app_state.load_app_state())
+
+    def test_load_returns_none_on_empty_file(self):
+        """An empty file (the exact bug scenario) should return None, not crash."""
+        with open(self.temp_path, 'w') as f:
+            pass  # Create empty file
+        result = self.app_state.load_app_state()
+        self.assertIsNone(result)
+
+    def test_load_returns_none_on_corrupted_json(self):
+        """Corrupted JSON should return None, not crash."""
+        with open(self.temp_path, 'w') as f:
+            f.write("{invalid json content!!!")
+        result = self.app_state.load_app_state()
+        self.assertIsNone(result)
+
+    def test_load_returns_none_on_non_dict_json(self):
+        """A JSON file containing a list or string should return None."""
+        with open(self.temp_path, 'w') as f:
+            json.dump(["not", "a", "dict"], f)
+        result = self.app_state.load_app_state()
+        self.assertIsNone(result)
+
+    def test_save_rejects_non_dict(self):
+        """save_app_state must reject non-dict arguments to prevent corruption."""
+        # First save valid data
+        valid_data = {"key": "value"}
+        self.app_state.save_app_state(valid_data)
+        
+        # Try to save a non-dict (simulates the original bug: passing MainWindow)
+        self.app_state.save_app_state("not a dict")
+        
+        # The original valid data should still be intact
+        loaded = self.app_state.load_app_state()
+        self.assertEqual(loaded, valid_data)
+
+    def test_save_rejects_none(self):
+        """save_app_state must reject None."""
+        valid_data = {"key": "value"}
+        self.app_state.save_app_state(valid_data)
+        self.app_state.save_app_state(None)
+        loaded = self.app_state.load_app_state()
+        self.assertEqual(loaded, valid_data)
+
+    def test_save_rejects_list(self):
+        """save_app_state must reject list arguments."""
+        valid_data = {"key": "value"}
+        self.app_state.save_app_state(valid_data)
+        self.app_state.save_app_state([1, 2, 3])
+        loaded = self.app_state.load_app_state()
+        self.assertEqual(loaded, valid_data)
+
+    def test_controller_to_dict_is_json_serializable(self):
+        """controller.to_dict() must produce data that json.dumps can serialize."""
+        ctrl = ScheduleController()
+        ctrl.services = [Service("Jour", "J", 12, "#A3D5FF")]
+        ctrl.people = [Person("Marie", "Dupont", 100)]
+        ctrl.sections = [Section(id="s1", label="Test", people_ids=[ctrl.people[0].id])]
+        ctrl.apply_assignment_change(ctrl.people[0].id, 15, ctrl.services[0].id, 2026, 1)
+        
+        data = ctrl.to_dict()
+        
+        # Must be a dict
+        self.assertIsInstance(data, dict)
+        
+        # Must be JSON-serializable (this would have caught the original bug)
+        try:
+            json_str = json.dumps(data)
+        except (TypeError, ValueError) as e:
+            self.fail(f"controller.to_dict() produced non-serializable data: {e}")
+        
+        # Must roundtrip through JSON
+        restored = json.loads(json_str)
+        self.assertIsInstance(restored, dict)
+        self.assertIn("people", restored)
+        self.assertIn("services", restored)
+
+    def test_full_app_state_roundtrip(self):
+        """Full integration: controller -> to_dict -> save -> load -> from_dict -> verify."""
+        ctrl = ScheduleController()
+        svc = Service("Jour", "J", 12, "#A3D5FF")
+        person = Person("Marie", "Dupont", 100)
+        ctrl.services = [svc]
+        ctrl.people = [person]
+        ctrl.sections = [Section(id="s1", label="Test", people_ids=[person.id])]
+        ctrl.schemas = [Schema("Week", 0, 7)]
+        ctrl.last_year = 2026
+        ctrl.last_month = 3
+        ctrl.apply_assignment_change(person.id, 15, svc.id, 2026, 3)
+        
+        # Save through AppState
+        self.app_state.save_app_state(ctrl.to_dict())
+        
+        # Load and restore
+        loaded = self.app_state.load_app_state()
+        self.assertIsNotNone(loaded)
+        
+        ctrl2 = ScheduleController()
+        ctrl2.from_dict(loaded)
+        
+        # Verify everything survived
+        self.assertEqual(len(ctrl2.people), 1)
+        self.assertEqual(ctrl2.people[0].prenom, "Marie")
+        self.assertEqual(ctrl2.last_year, 2026)
+        self.assertEqual(ctrl2.last_month, 3)
+        self.assertTrue(any(s.name == "Jour" for s in ctrl2.services))
+        self.assertEqual(len(ctrl2.schemas), 1)
+
+
+# ================================================================
+# SAVE_APP_STATE CALL SITE SAFETY (Static Analysis)
+# ================================================================
+class TestAppStateSaveCallSites(unittest.TestCase):
+    """
+    Static analysis test that scans all .py files to ensure every call 
+    to save_app_state() passes .to_dict() as its argument.
+    
+    This catches the exact bug that corrupted app_state.json: calling
+    save_app_state(self) or save_app_state(main_window) instead of
+    save_app_state(self.controller.to_dict()).
+    """
+
+    def test_all_save_calls_use_to_dict(self):
+        """Every save_app_state() call must pass .to_dict() as its argument."""
+        import re
+        import glob
+
+        project_dir = os.path.dirname(os.path.abspath(__file__))
+        py_files = glob.glob(os.path.join(project_dir, "*.py"))
+
+        # Pattern matches: save_app_state(<anything>) on a line
+        # We use a greedy match to capture everything including nested parens
+        call_pattern = re.compile(r'save_app_state\((.+)\)')
+        
+        # Skip the definition line and test files
+        skip_files = {"tests.py", "app_state.py"}
+
+        violations = []
+
+        for filepath in py_files:
+            filename = os.path.basename(filepath)
+            if filename in skip_files:
+                continue
+
+            with open(filepath, "r", encoding="utf-8") as f:
+                for lineno, line in enumerate(f, 1):
+                    # Skip comments
+                    stripped = line.strip()
+                    if stripped.startswith("#"):
+                        continue
+                    
+                    match = call_pattern.search(line)
+                    if match:
+                        argument = match.group(1).strip()
+                        if ".to_dict()" not in argument:
+                            violations.append(
+                                f"{filename}:{lineno} - "
+                                f"save_app_state({argument}) "
+                                f"does NOT use .to_dict(). "
+                                f"This will corrupt app_state.json!"
+                            )
+
+        if violations:
+            msg = (
+                "save_app_state() called with non-.to_dict() argument!\n"
+                "This WILL corrupt app_state.json and prevent the app from launching.\n"
+                "All calls must use: save_app_state(controller.to_dict())\n\n"
+                + "\n".join(f"  ❌ {v}" for v in violations)
+            )
+            self.fail(msg)
+
+
+# ================================================================
 # TEST RUNNER
 # ================================================================
 def run_tests():
@@ -817,6 +1022,8 @@ def run_tests():
         TestScheduleUndoManager,
         TestFileOperations,
         TestBuildSafety,
+        TestAppState,
+        TestAppStateSaveCallSites,
     ]
 
     for cls in test_classes:

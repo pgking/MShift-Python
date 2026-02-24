@@ -62,7 +62,7 @@ from drag_drop_handler import DragDropHandler
 from copy_paste_handler import CopyPasteHandler
 from migration import rebuild_rows_from_sections
 
-VERSION = "1.0.13"
+VERSION = "1.0.14"
 
 # ============================================================
 # Constants
@@ -1209,7 +1209,7 @@ class MainWindow(QMainWindow):
         )
 
         self.finalize_table_setup()
-        self.app_state.save_app_state(self)
+        self.app_state.save_app_state(self.controller.to_dict())
 
         if self.preferences.auto_save:
             self.quick_save()
@@ -1235,7 +1235,7 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self.services.append(dialog.service)
             self.finalize_table_setup()
-            self.app_state.save_app_state(self)
+            self.app_state.save_app_state(self.controller.to_dict())
 
             if self.preferences.auto_save:
                 self.quick_save()

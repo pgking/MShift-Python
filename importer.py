@@ -248,7 +248,7 @@ def import_from_excel(main_window):
                      changes_count += 1
             
     # 5. Finish
-    main_window.app_state.save_app_state(main_window)
+    main_window.app_state.save_app_state(main_window.controller.to_dict())
     main_window.recompute_current_month_violations()
     main_window.refresh_row_headers()
     main_window.table.viewport().update()
