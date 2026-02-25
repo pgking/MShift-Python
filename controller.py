@@ -259,43 +259,75 @@ class ScheduleController:
     def calculate_stats_for_month(self, person_id, year, month):
         """
         Calculate visual stats for the person list (Nights, Weekends).
+        
+        Weekend logic:
+        - A "weekend worked" is counted when any qualifying service is assigned
+          on a Saturday, Sunday, or Friday night (which means working Fri 8pm -> Sat 8am).
+        - Sunday night also counts (working Sun 8pm -> Mon 8am covers the weekend).
+        - Excluded services: CA (conges annuels), Desideratas (blank short_name), and Cabinet.
+        - Each weekend is counted only once using ISO week numbers.
         """
+        import datetime
         month_data = self.get_month_data(year, month)
         
         # Identify Night service (search for 'N' or 'Nuit')
         night_service = next((s for s in self.services if s.short_name == "N" or s.name.lower() == "nuit"), None)
         night_id = night_service.id if night_service else None
         
-        night_count = 0
-        sat_count = 0
-        sun_count = 0
+        # Identify Jour service for weekend circle color
+        jour_service = next((s for s in self.services if s.short_name == "J" or s.name.lower() == "jour"), None)
         
-        # Iterate all days (get_service handles valid range internally, but best to loop days)
-        # Use simple day iteration
+        # Build set of excluded service IDs (CA, Desideratas, Cabinet)
+        excluded_ids = set()
+        for s in self.services:
+            if s.short_name == "CA":
+                excluded_ids.add(s.id)
+            elif s.name.lower() == "cabinet":
+                excluded_ids.add(s.id)
+            elif s.short_name is not None and s.short_name.strip() == "":
+                # Desideratas appear blank in the schedule
+                excluded_ids.add(s.id)
+        
+        night_count = 0
+        weekends_worked = set()  # Set of (year, iso_week) for unique weekend counting
+        
         _, days_in_month = calendar.monthrange(year, month)
         
         for d in range(1, days_in_month + 1):
             service_id = month_data.get_service(person_id, d)
             
-            if service_id is not None:
-                # Night Check
-                if night_id and service_id == night_id:
-                    night_count += 1
+            if service_id is None:
+                continue
+            
+            # Night Check (all services count for night, no exclusions)
+            if night_id and service_id == night_id:
+                night_count += 1
+            
+            # Weekend Check - exclude CA and Desideratas
+            if service_id in excluded_ids:
+                continue
                 
-                # Weekend Check (Any service)
-                weekday = calendar.weekday(year, month, d)
-                if weekday == calendar.SATURDAY:
-                    sat_count += 1
-                elif weekday == calendar.SUNDAY:
-                    sun_count += 1
-                    
+            dt = datetime.date(year, month, d)
+            weekday = dt.weekday()  # 0=Monday, 4=Friday, 5=Saturday, 6=Sunday
+            iso_cal = dt.isocalendar()
+            
+            if weekday == 5 or weekday == 6:
+                # Saturday or Sunday with a qualifying service
+                weekends_worked.add((iso_cal[0], iso_cal[1]))
+            elif weekday == 4 and night_id and service_id == night_id:
+                # Friday night = working into Saturday morning = weekend worked
+                # The weekend is the next day's weekend (Saturday's ISO week)
+                sat_dt = dt + datetime.timedelta(days=1)
+                sat_iso = sat_dt.isocalendar()
+                weekends_worked.add((sat_iso[0], sat_iso[1]))
+                
         return {
             "night_count": night_count,
-            "weekend_stats": (sat_count, sun_count),
+            "weekend_count": len(weekends_worked),
             "night_color": night_service.color_hex if night_service else "#000000",
-            # Hardcoded gray for weekend shading to match typical UI style
-            "weekend_color": "#C8C8C8" 
+            "weekend_color": jour_service.color_hex if jour_service else "#A3D5FF" 
         }
+
 
     def apply_schema_to_month(self, schema: Schema, person_id: str, year: int, month: int, 
                              overwrite: bool = True, start_period: tuple = None):

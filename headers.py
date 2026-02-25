@@ -25,6 +25,7 @@ class ColoredVerticalHeader(QHeaderView):
 
     def clear_stats(self):
         self._person_stats.clear()
+        self._row_colors.clear()
 
     def paintSection(self, painter, rect, logicalIndex):
         color = self._row_colors.get(logicalIndex)
@@ -50,19 +51,20 @@ class ColoredVerticalHeader(QHeaderView):
     def _get_stats_geometry(self, rect):
         """Returns (night_rect, weekend_rect) relative to rect."""
         zoom = self._get_zoom()
-        circle_size = int(10 * zoom)
+        circle_size = int(12 * zoom)
         margin_right = int(6 * zoom)
         spacing = int(4 * zoom)
         
-        # Right aligned
-        x = rect.right() - margin_right - circle_size
+        # Right aligned, side by side horizontally
+        total_w = (2 * circle_size) + spacing
+        x_right = rect.right() - margin_right - circle_size
+        x_left = x_right - spacing - circle_size
         
         # Centered vertically
-        total_h = (2 * circle_size) + spacing
-        start_y = rect.center().y() - (total_h / 2) + (circle_size / 2)
+        y = rect.center().y() - circle_size // 2
         
-        night_rect = QRect(x, int(start_y - circle_size/2), circle_size, circle_size)
-        weekend_rect = QRect(x, int(start_y + circle_size/2 + spacing), circle_size, circle_size)
+        night_rect = QRect(x_left, y, circle_size, circle_size)
+        weekend_rect = QRect(x_right, y, circle_size, circle_size)
         
         return night_rect, weekend_rect
 
@@ -73,15 +75,21 @@ class ColoredVerticalHeader(QHeaderView):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
         
-        # Night Circle
+        # Night Circle (turns red when >= 7)
         if stats["night_count"] is not None:
-             col_hex = stats.get("night_color", "#000000")
+             if stats["night_count"] >= 7:
+                 col_hex = "#CC0000"
+             else:
+                 col_hex = stats.get("night_color", "#000000")
              painter.setBrush(QBrush(QColor(col_hex)))
              painter.drawEllipse(night_rect)
 
-        # Weekend Circle
-        if stats["weekend_stats"] is not None:
-             col_hex = stats.get("weekend_color", "#C8C8C8")
+        # Weekend Circle (turns red when >= 3)
+        if stats["weekend_count"] is not None:
+             if stats["weekend_count"] >= 3:
+                 col_hex = "#CC0000"
+             else:
+                 col_hex = stats.get("weekend_color", "#A3D5FF")
              painter.setBrush(QBrush(QColor(col_hex)))
              painter.drawEllipse(weekend_rect)
 
@@ -367,9 +375,8 @@ class ColoredVerticalHeader(QHeaderView):
                 if night_rect.contains(pos) and stats["night_count"] is not None:
                     QToolTip.showText(event.globalPos(), f"Nuits : {stats['night_count']}", self)
                     tooltip_shown = True
-                elif weekend_rect.contains(pos) and stats["weekend_stats"] is not None:
-                    sat, sun = stats["weekend_stats"]
-                    QToolTip.showText(event.globalPos(), f"Samedi : {sat}, Dimanche : {sun}", self)
+                elif weekend_rect.contains(pos) and stats["weekend_count"] is not None:
+                    QToolTip.showText(event.globalPos(), f"Weekends travaillés : {stats['weekend_count']}", self)
                     tooltip_shown = True
 
         if not tooltip_shown:

@@ -441,8 +441,8 @@ class TestScheduleController(unittest.TestCase):
         md.set_service(self.person.id, 3, self.svc_day.id)
         stats = self.ctrl.calculate_stats_for_month(self.person.id, 2026, 1)
         self.assertEqual(stats["night_count"], 2)
-        sat, sun = stats["weekend_stats"]
-        self.assertEqual(sat, 1)
+        # Saturday Jan 3 counts as 1 weekend worked
+        self.assertEqual(stats["weekend_count"], 1)
 
     def test_apply_schema_to_month(self):
         schema = Schema("Test", start_weekday=0, span_days=7)

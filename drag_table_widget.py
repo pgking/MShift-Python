@@ -68,10 +68,12 @@ class DragTableWidget(QTableWidget):
         for col in range(self.columnCount()):
             if self._is_shaded_column(col):
                 for row in range(self.rowCount()):
-                    # Skip shading overlay if the cell has a service (text)
+                    # Skip shading overlay if the cell has a service (text or background color)
                     # or if it's a section specialized row (handled above)
                     item = self.item(row, col)
-                    if (item and item.text()) or self.main_window.is_section_row(row):
+                    if item and (item.text() or item.background().style() != Qt.NoBrush):
+                        continue
+                    if self.main_window.is_section_row(row):
                         continue
 
                     rect = self.visualRect(self.model().index(row, col))

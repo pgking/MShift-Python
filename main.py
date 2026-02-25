@@ -62,7 +62,7 @@ from drag_drop_handler import DragDropHandler
 from copy_paste_handler import CopyPasteHandler
 from migration import rebuild_rows_from_sections
 
-VERSION = "1.0.15"
+VERSION = "1.0.17"
 
 # ============================================================
 # Constants
@@ -1737,7 +1737,7 @@ class MainWindow(QMainWindow):
                     item.setBackground(QBrush(QColor("#FF5555")))
             else:
                 item.setText("")
-                item.setBackground(QBrush(Qt.transparent))
+                item.setBackground(QBrush())
 
         self.table.blockSignals(False)
 
