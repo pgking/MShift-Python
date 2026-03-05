@@ -41,6 +41,7 @@ class DragDropHandler:
         src_service_id = src_month_data.get_service(src_person.id, src_day)
         # Capture Note
         src_note = src_month_data.get_note(src_person.id, src_day)
+        src_split = src_month_data.get_split(src_person.id, src_day)
         
         if src_service_id is None:
             return
@@ -64,6 +65,10 @@ class DragDropHandler:
         # Apply Note to target
         if src_service_id == "builtin_note":
              tgt_month_data.set_note(tgt_person.id, tgt_day, src_note)
+        
+        # Apply Split data to target
+        if src_service_id == "builtin_split" and src_split:
+             tgt_month_data.set_split(tgt_person.id, tgt_day, src_split["am"], src_split["pm"])
 
     def swap_services(self, src_person, src_day, src_month_data,
                       tgt_person, tgt_day, tgt_month_data):
@@ -73,6 +78,8 @@ class DragDropHandler:
         
         src_note = src_month_data.get_note(src_person.id, src_day)
         tgt_note = tgt_month_data.get_note(tgt_person.id, tgt_day)
+        src_split = src_month_data.get_split(src_person.id, src_day)
+        tgt_split = tgt_month_data.get_split(tgt_person.id, tgt_day)
 
         if src_service_id is None and tgt_service_id is None:
             return
@@ -95,12 +102,23 @@ class DragDropHandler:
         if src_service_id == "builtin_note":
              tgt_month_data.set_note(tgt_person.id, tgt_day, src_note)
         else:
-             tgt_month_data.set_note(tgt_person.id, tgt_day, None) # Ensure clear if not note
+             tgt_month_data.set_note(tgt_person.id, tgt_day, None)
         
         if tgt_service_id == "builtin_note":
              src_month_data.set_note(src_person.id, src_day, tgt_note)
         else:
-             src_month_data.set_note(src_person.id, src_day, None) # Ensure clear if not note
+             src_month_data.set_note(src_person.id, src_day, None)
+        
+        # Apply Split data
+        if src_service_id == "builtin_split" and src_split:
+             tgt_month_data.set_split(tgt_person.id, tgt_day, src_split["am"], src_split["pm"])
+        else:
+             tgt_month_data.split_data.pop((tgt_person.id, tgt_day), None)
+        
+        if tgt_service_id == "builtin_split" and tgt_split:
+             src_month_data.set_split(src_person.id, src_day, tgt_split["am"], tgt_split["pm"])
+        else:
+             src_month_data.split_data.pop((src_person.id, src_day), None)
 
     def handle_drop(self, source_index, pos):
         if self.drag_source is None:

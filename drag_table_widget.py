@@ -1,5 +1,5 @@
 from PyQt5.QtCore import Qt, QRect, QPoint
-from PyQt5.QtGui import QPainter, QColor, QPen
+from PyQt5.QtGui import QPainter, QColor, QPen, QBrush, QPolygon, QFont
 from PyQt5.QtWidgets import QTableWidget
 
 class DragTableWidget(QTableWidget):
@@ -60,6 +60,92 @@ class DragTableWidget(QTableWidget):
                 rect,
                 QColor(245, 245, 245)
             )
+
+        # ----------------------
+        # Split cell rendering
+        # ----------------------
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        for row in range(self.rowCount()):
+            for col in range(self.columnCount()):
+                item = self.item(row, col)
+                if not item or item.data(Qt.UserRole) != "split":
+                    continue
+                
+                rect = self.visualRect(self.model().index(row, col))
+                if not rect.isValid():
+                    continue
+                
+                am_color = QColor(item.data(Qt.UserRole + 1) or "#FFFFFF")
+                pm_color = QColor(item.data(Qt.UserRole + 2) or "#FFFFFF")
+                am_text = item.data(Qt.UserRole + 3) or ""
+                pm_text = item.data(Qt.UserRole + 4) or ""
+                
+                # Use actual pixel boundaries (QRect.right/bottom are off by 1)
+                r_left = rect.x()
+                r_top = rect.y()
+                r_right = rect.x() + rect.width()
+                r_bottom = rect.y() + rect.height()
+                
+                # Morning triangle (top-left)
+                am_poly = QPolygon([
+                    QPoint(r_left, r_bottom),
+                    QPoint(r_left, r_top),
+                    QPoint(r_right, r_top)
+                ])
+                
+                # Afternoon triangle (bottom-right)
+                pm_poly = QPolygon([
+                    QPoint(r_left, r_bottom),
+                    QPoint(r_right, r_top),
+                    QPoint(r_right, r_bottom)
+                ])
+                
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QBrush(am_color))
+                painter.drawPolygon(am_poly)
+                
+                painter.setBrush(QBrush(pm_color))
+                painter.drawPolygon(pm_poly)
+                
+                # Diagonal line (bottom-left to top-right)
+                painter.setPen(QPen(QColor(80, 80, 80), 1))
+                painter.drawLine(QPoint(r_left, r_bottom), QPoint(r_right, r_top))
+                
+                # Short name labels
+                painter.setPen(QPen(QColor(0, 0, 0)))
+                font = painter.font()
+                base_size = font.pointSizeF()
+                small_font = QFont(font)
+                small_font.setPointSizeF(max(5, base_size * 0.85))
+                # Inherit formatting from item's font
+                item_font = item.font()
+                small_font.setBold(item_font.bold() if item_font.bold() else True)
+                small_font.setItalic(item_font.italic())
+                small_font.setUnderline(item_font.underline())
+                painter.setFont(small_font)
+                
+                # AM text: midpoint between top-left corner and cell center
+                if am_text:
+                    am_cx = rect.left() + rect.width() // 4
+                    am_cy = rect.top() + rect.height() // 4
+                    tw = rect.width() // 2
+                    th = rect.height() // 2
+                    am_rect = QRect(am_cx - tw // 2, am_cy - th // 2, tw, th)
+                    painter.drawText(am_rect, Qt.AlignCenter, am_text)
+                
+                # PM text: midpoint between bottom-right corner and cell center
+                if pm_text:
+                    pm_cx = rect.right() - rect.width() // 4
+                    pm_cy = rect.bottom() - rect.height() // 4
+                    tw = rect.width() // 2
+                    th = rect.height() // 2
+                    pm_rect = QRect(pm_cx - tw // 2, pm_cy - th // 2, tw, th)
+                    painter.drawText(pm_rect, Qt.AlignCenter, pm_text)
+                
+                # Restore font
+                painter.setFont(font)
+        
+        painter.setRenderHint(QPainter.Antialiasing, False)
 
         # ----------------------
         # Column shading (Weekends)

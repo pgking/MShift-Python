@@ -71,30 +71,49 @@ class ScheduleController:
         }
 
     def ensure_builtin_services(self):
-        note_id = "builtin_note"
-        existing = next((s for s in self.services if s.id == note_id), None)
+        # --- Split service ---
+        split_id = "builtin_split"
+        split_existing = next((s for s in self.services if s.id == split_id), None)
         
-        if existing:
-            # Update labels just in case
-            existing.name = "Note (Texte libre)"
-            existing.short_name = "..."
-            existing.is_visible = True # FORCE VISIBLE
-            
-            # Move to BOTTOM if not already
-            if self.services.index(existing) != len(self.services) - 1:
-                self.services.remove(existing)
-                self.services.append(existing)
-            return
-
-        # Append to bottom
-        self.services.append(Service(
-            name="Note (Texte libre)",
-            short_name="...",
-            hours=0,
-            color_hex="#E0E0E0",
-            id=note_id,
-            is_visible=True
-        ))
+        if split_existing:
+            split_existing.name = "Journée coupée"
+            split_existing.short_name = "/"
+            split_existing.is_visible = True
+        else:
+            split_existing = Service(
+                name="Journée coupée",
+                short_name="/",
+                hours=0,
+                color_hex="#FFFFFF",
+                id=split_id,
+                is_visible=True
+            )
+            self.services.append(split_existing)
+        
+        # --- Note service ---
+        note_id = "builtin_note"
+        note_existing = next((s for s in self.services if s.id == note_id), None)
+        
+        if note_existing:
+            note_existing.name = "Note (Texte libre)"
+            note_existing.short_name = "..."
+            note_existing.is_visible = True
+        else:
+            note_existing = Service(
+                name="Note (Texte libre)",
+                short_name="...",
+                hours=0,
+                color_hex="#E0E0E0",
+                id=note_id,
+                is_visible=True
+            )
+            self.services.append(note_existing)
+        
+        # Ensure order: split second-to-last, note last
+        for svc in [split_existing, note_existing]:
+            if svc in self.services:
+                self.services.remove(svc)
+            self.services.append(svc)
 
     def from_dict(self, data: dict):
         """Restores state from a dictionary."""
@@ -277,8 +296,9 @@ class ScheduleController:
         # Identify Jour service for weekend circle color
         jour_service = next((s for s in self.services if s.short_name == "J" or s.name.lower() == "jour"), None)
         
-        # Build set of excluded service IDs (CA, Desideratas, Cabinet)
+        # Build set of excluded service IDs (CA, Desideratas, Cabinet, Split)
         excluded_ids = set()
+        excluded_ids.add("builtin_split")  # Split service never counts
         for s in self.services:
             if s.short_name == "CA":
                 excluded_ids.add(s.id)

@@ -57,7 +57,18 @@ class WorkloadCalculator:
 
             service = next((s for s in self.services if s.id == service_id), None)
             if service:
-                total_hours += service.get_duration(year, month, day, month_data.holidays, person_percentage=person.percentage)
+                if service.id == "builtin_split":
+                    # Split cell: half of AM hours + half of PM hours
+                    split_info = month_data.get_split(person.id, day)
+                    if split_info:
+                        am_svc = next((s for s in self.services if s.id == split_info.get("am")), None) if split_info.get("am") else None
+                        pm_svc = next((s for s in self.services if s.id == split_info.get("pm")), None) if split_info.get("pm") else None
+                        if am_svc:
+                            total_hours += am_svc.get_duration(year, month, day, month_data.holidays, person_percentage=person.percentage) / 2
+                        if pm_svc:
+                            total_hours += pm_svc.get_duration(year, month, day, month_data.holidays, person_percentage=person.percentage) / 2
+                else:
+                    total_hours += service.get_duration(year, month, day, month_data.holidays, person_percentage=person.percentage)
 
         return total_hours
     

@@ -387,19 +387,95 @@ def export_to_image(self):
                 cell_text = ""
                 
                 if appearance.type == "service" and appearance.service:
-                    cell_bg = QColor(appearance.service.color_hex)
-                    cell_text = appearance.service.short_name
+                    if appearance.service.id == "builtin_split":
+                        # Split cell - draw diagonal
+                        split_info = month_data.get_split(person.id, day)
+                        am_svc = next((s for s in self.services if s.id == split_info.get("am")), None) if split_info and split_info.get("am") else None
+                        pm_svc = next((s for s in self.services if s.id == split_info.get("pm")), None) if split_info and split_info.get("pm") else None
+                        
+                        from PyQt5.QtCore import QPointF
+                        from PyQt5.QtGui import QPolygonF
+                        
+                        cell_rect = QRectF(cur_x, current_y, col_day_width, actual_row_height)
+                        
+                        # AM triangle (top-left)
+                        am_poly = QPolygonF([
+                            QPointF(cell_rect.left(), cell_rect.bottom()),
+                            QPointF(cell_rect.left(), cell_rect.top()),
+                            QPointF(cell_rect.right(), cell_rect.top())
+                        ])
+                        painter.setPen(Qt.NoPen)
+                        painter.setBrush(QBrush(QColor(am_svc.color_hex if am_svc else "#FFFFFF")))
+                        painter.drawPolygon(am_poly)
+                        
+                        # PM triangle (bottom-right)
+                        pm_poly = QPolygonF([
+                            QPointF(cell_rect.left(), cell_rect.bottom()),
+                            QPointF(cell_rect.right(), cell_rect.top()),
+                            QPointF(cell_rect.right(), cell_rect.bottom())
+                        ])
+                        painter.setBrush(QBrush(QColor(pm_svc.color_hex if pm_svc else "#FFFFFF")))
+                        painter.drawPolygon(pm_poly)
+                        
+                        # Diagonal line
+                        painter.setPen(QPen(Qt.black, 1))
+                        painter.drawLine(cell_rect.bottomLeft(), cell_rect.topRight())
+                        
+                        # Border
+                        painter.setBrush(Qt.NoBrush)
+                        painter.setPen(QPen(Qt.black, 2))
+                        painter.drawRect(cell_rect)
+                        
+                        # Text labels - apply cell formatting
+                        cell_fmt = month_data.get_cell_format(person.id, day)
+                        small_font = QFont("Arial", 9, QFont.Bold)
+                        if cell_fmt:
+                            small_font.setBold(cell_fmt.get("bold", False) or True)
+                            small_font.setItalic(cell_fmt.get("italic", False))
+                            small_font.setUnderline(cell_fmt.get("underline", False))
+                        painter.setFont(small_font)
+                        if am_svc:
+                            am_cx = cell_rect.left() + cell_rect.width() / 4
+                            am_cy = cell_rect.top() + cell_rect.height() / 4
+                            tw = cell_rect.width() / 2
+                            th = cell_rect.height() / 2
+                            am_rect = QRectF(am_cx - tw / 2, am_cy - th / 2, tw, th)
+                            painter.drawText(am_rect, Qt.AlignCenter, am_svc.short_name)
+                        if pm_svc:
+                            pm_cx = cell_rect.right() - cell_rect.width() / 4
+                            pm_cy = cell_rect.bottom() - cell_rect.height() / 4
+                            tw = cell_rect.width() / 2
+                            th = cell_rect.height() / 2
+                            pm_rect = QRectF(pm_cx - tw / 2, pm_cy - th / 2, tw, th)
+                            painter.drawText(pm_rect, Qt.AlignCenter, pm_svc.short_name)
+                        painter.setFont(font_cell)
+                        cell_text = ""
+                        cell_bg = Qt.white
+                    else:
+                        cell_bg = QColor(appearance.service.color_hex)
+                        cell_text = appearance.service.short_name
                 elif appearance.type == "holiday":
                     cell_bg = QColor("#DDDDDD")
                 elif appearance.type == "weekend":
                     cell_bg = QColor("#DDDDDD")
-                    
-                painter.setBrush(QBrush(cell_bg))
-                painter.drawRect(QRectF(cur_x, current_y, col_day_width, actual_row_height))
-                painter.setBrush(Qt.NoBrush)
+                
+                if appearance.type != "service" or (appearance.service and appearance.service.id != "builtin_split"):
+                    painter.setBrush(QBrush(cell_bg))
+                    painter.drawRect(QRectF(cur_x, current_y, col_day_width, actual_row_height))
+                    painter.setBrush(Qt.NoBrush)
                 
                 if cell_text:
+                    # Apply cell formatting for regular cells
+                    cell_fmt = month_data.get_cell_format(person.id, day)
+                    if cell_fmt:
+                        fmt_font = QFont(font_cell)
+                        fmt_font.setBold(cell_fmt.get("bold", False))
+                        fmt_font.setItalic(cell_fmt.get("italic", False))
+                        fmt_font.setUnderline(cell_fmt.get("underline", False))
+                        painter.setFont(fmt_font)
                     painter.drawText(QRectF(cur_x, current_y, col_day_width, actual_row_height), Qt.AlignCenter, cell_text)
+                    if cell_fmt:
+                        painter.setFont(font_cell)
                 
                 cur_x += col_day_width
                 

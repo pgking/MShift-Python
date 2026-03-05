@@ -27,6 +27,14 @@ from controller import ScheduleController
 from rules import StaffingRule, ServiceKind, Severity, evaluate_rules, DEFAULT_RULES
 from preferences import Preferences
 from undo_manager import UndoManager, UndoableAction, ScheduleUndoManager
+from workload import WorkloadCalculator
+
+
+class _MockMainWindow:
+    """Lightweight stand-in for MainWindow for WorkloadCalculator tests."""
+    def __init__(self, services, schedule):
+        self.services = services
+        self.schedule = schedule
 
 
 # ================================================================
@@ -997,6 +1005,305 @@ class TestAppStateSaveCallSites(unittest.TestCase):
 
 
 # ================================================================
+# SPLIT SERVICE
+# ================================================================
+class TestSplitService(unittest.TestCase):
+    """Tests for the split-cell / 'Journée coupée' feature."""
+
+    def test_set_and_get_split(self):
+        md = MonthData(2026, 4)
+        md.set_split("p1", 10, "svc_am", "svc_pm")
+        result = md.get_split("p1", 10)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["am"], "svc_am")
+        self.assertEqual(result["pm"], "svc_pm")
+
+    def test_get_split_returns_none_when_absent(self):
+        md = MonthData(2026, 4)
+        self.assertIsNone(md.get_split("p1", 10))
+
+    def test_set_split_with_none_clears(self):
+        md = MonthData(2026, 4)
+        md.set_split("p1", 10, "svc_am", "svc_pm")
+        md.set_split("p1", 10, None, None)
+        self.assertIsNone(md.get_split("p1", 10))
+
+    def test_clearing_service_clears_split_data(self):
+        md = MonthData(2026, 4)
+        md.set_service("p1", 10, "builtin_split")
+        md.set_split("p1", 10, "svc_am", "svc_pm")
+        md.set_service("p1", 10, None)  # Remove service
+        self.assertIsNone(md.get_split("p1", 10))
+
+    def test_overwriting_service_clears_split_data(self):
+        md = MonthData(2026, 4)
+        md.set_service("p1", 10, "builtin_split")
+        md.set_split("p1", 10, "svc_am", "svc_pm")
+        md.set_service("p1", 10, "other_service")  # Overwrite with regular
+        self.assertIsNone(md.get_split("p1", 10))
+
+    def test_split_data_serialization_roundtrip(self):
+        md = MonthData(2026, 4)
+        md.set_service("p1", 10, "builtin_split")
+        md.set_split("p1", 10, "svc_am", "svc_pm")
+        data = md.to_dict()
+        json_str = json.dumps(data)
+        restored_data = json.loads(json_str)
+        restored = MonthData.from_dict(restored_data)
+        result = restored.get_split("p1", 10)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["am"], "svc_am")
+        self.assertEqual(result["pm"], "svc_pm")
+        self.assertEqual(restored.get_service("p1", 10), "builtin_split")
+
+    def test_split_data_absent_in_old_files(self):
+        """Files saved before split feature should load without errors."""
+        data = {
+            "year": 2026, "month": 3,
+            "assignments": {"p1_5": "s1"},
+            "holidays": [],
+            "comments": {}
+            # No split_data key
+        }
+        restored = MonthData.from_dict(data)
+        self.assertEqual(restored.get_service("p1", 5), "s1")
+        self.assertIsNone(restored.get_split("p1", 5))
+        self.assertEqual(len(restored.split_data), 0)
+
+    def test_multiple_split_cells_independent(self):
+        md = MonthData(2026, 4)
+        md.set_split("p1", 10, "am1", "pm1")
+        md.set_split("p1", 11, "am2", "pm2")
+        md.set_split("p2", 10, "am3", "pm3")
+        self.assertEqual(md.get_split("p1", 10)["am"], "am1")
+        self.assertEqual(md.get_split("p1", 11)["pm"], "pm2")
+        self.assertEqual(md.get_split("p2", 10)["am"], "am3")
+
+    def test_builtin_split_in_controller(self):
+        ctrl = ScheduleController()
+        ctrl.services = [Service("Jour", "J", 12, "#A3D5FF")]
+        ctrl.ensure_builtin_services()
+        split_svc = next((s for s in ctrl.services if s.id == "builtin_split"), None)
+        self.assertIsNotNone(split_svc)
+        self.assertEqual(split_svc.name, "Journée coupée")
+        self.assertEqual(split_svc.short_name, "/")
+
+    def test_builtin_split_before_note(self):
+        ctrl = ScheduleController()
+        ctrl.services = [Service("Jour", "J", 12, "#A3D5FF")]
+        ctrl.ensure_builtin_services()
+        ids = [s.id for s in ctrl.services]
+        split_idx = ids.index("builtin_split")
+        note_idx = ids.index("builtin_note")
+        self.assertLess(split_idx, note_idx)
+        # Note should be last
+        self.assertEqual(note_idx, len(ids) - 1)
+
+    def test_split_excluded_from_weekend_stats(self):
+        """Split service should not count as a weekend worked."""
+        ctrl = ScheduleController()
+        svc_day = Service("Jour", "J", 12, "#A3D5FF")
+        svc_night = Service("Nuit", "N", 12, "#FFD6A3")
+        ctrl.services = [svc_day, svc_night]
+        ctrl.ensure_builtin_services()
+        person = Person("Marie", "Dupont", 100)
+        ctrl.people = [person]
+        md = ctrl.get_month_data(2026, 4)
+        # April 4, 2026 is a Saturday
+        md.set_service(person.id, 4, "builtin_split")
+        md.set_split(person.id, 4, svc_day.id, svc_night.id)
+        stats = ctrl.calculate_stats_for_month(person.id, 2026, 4)
+        self.assertEqual(stats["weekend_count"], 0)
+
+    def test_split_excluded_from_night_stats(self):
+        """Split service should not count as a night."""
+        ctrl = ScheduleController()
+        svc_day = Service("Jour", "J", 12, "#A3D5FF")
+        svc_night = Service("Nuit", "N", 12, "#FFD6A3")
+        ctrl.services = [svc_day, svc_night]
+        ctrl.ensure_builtin_services()
+        person = Person("Marie", "Dupont", 100)
+        ctrl.people = [person]
+        md = ctrl.get_month_data(2026, 4)
+        # Even if PM is night, the split marker itself shouldn't count
+        md.set_service(person.id, 1, "builtin_split")
+        md.set_split(person.id, 1, svc_day.id, svc_night.id)
+        stats = ctrl.calculate_stats_for_month(person.id, 2026, 4)
+        self.assertEqual(stats["night_count"], 0)
+
+    def test_split_workload_half_hours(self):
+        """Split cell hours = half AM + half PM."""
+        svc_am = Service("Jour", "J", 12, "#A3D5FF")
+        svc_pm = Service("Consult", "C", 8, "#AAFFAA")
+        svc_split = Service("Journée coupée", "/", 0, "#FFFFFF", id="builtin_split")
+        services = [svc_am, svc_pm, svc_split]
+        person = Person("Marie", "Dupont", 100)
+        md = MonthData(2026, 4)
+        md.set_service(person.id, 1, "builtin_split")
+        md.set_split(person.id, 1, svc_am.id, svc_pm.id)
+        wl = WorkloadCalculator(_MockMainWindow(services, {(2026, 4): md}))
+        hours = wl.worked_hours_for_person(person, 2026, 4)
+        # (12 / 2) + (8 / 2) = 6 + 4 = 10
+        self.assertEqual(hours, 10)
+
+    def test_split_workload_one_side_only(self):
+        """Split with only AM should count half of AM hours."""
+        svc_am = Service("Jour", "J", 12, "#A3D5FF")
+        svc_split = Service("Journée coupée", "/", 0, "#FFFFFF", id="builtin_split")
+        services = [svc_am, svc_split]
+        person = Person("Marie", "Dupont", 100)
+        md = MonthData(2026, 4)
+        md.set_service(person.id, 1, "builtin_split")
+        md.set_split(person.id, 1, svc_am.id, None)
+        wl = WorkloadCalculator(_MockMainWindow(services, {(2026, 4): md}))
+        hours = wl.worked_hours_for_person(person, 2026, 4)
+        # 12 / 2 = 6
+        self.assertEqual(hours, 6)
+
+    def test_split_workload_no_split_data(self):
+        """Split marker without split_data should contribute 0 hours."""
+        svc_split = Service("Journée coupée", "/", 0, "#FFFFFF", id="builtin_split")
+        services = [svc_split]
+        person = Person("Marie", "Dupont", 100)
+        md = MonthData(2026, 4)
+        md.set_service(person.id, 1, "builtin_split")
+        # No set_split call
+        wl = WorkloadCalculator(_MockMainWindow(services, {(2026, 4): md}))
+        hours = wl.worked_hours_for_person(person, 2026, 4)
+        self.assertEqual(hours, 0)
+
+    def test_split_alongside_regular_services(self):
+        """Mix of split and regular services should sum correctly."""
+        svc_day = Service("Jour", "J", 12, "#A3D5FF")
+        svc_consult = Service("Consult", "C", 8, "#AAFFAA")
+        svc_split = Service("Journée coupée", "/", 0, "#FFFFFF", id="builtin_split")
+        services = [svc_day, svc_consult, svc_split]
+        person = Person("Marie", "Dupont", 100)
+        md = MonthData(2026, 4)
+        # Day 1: regular 12h service
+        md.set_service(person.id, 1, svc_day.id)
+        # Day 2: split (12/2 + 8/2 = 10)
+        md.set_service(person.id, 2, "builtin_split")
+        md.set_split(person.id, 2, svc_day.id, svc_consult.id)
+        wl = WorkloadCalculator(_MockMainWindow(services, {(2026, 4): md}))
+        hours = wl.worked_hours_for_person(person, 2026, 4)
+        self.assertEqual(hours, 22)  # 12 + 10
+
+    def test_split_serialization_with_underscore_person_id(self):
+        """Person IDs with underscores should serialize/deserialize correctly."""
+        md = MonthData(2026, 4)
+        md.set_split("person_with_underscores", 15, "am_svc", "pm_svc")
+        data = md.to_dict()
+        json_str = json.dumps(data)
+        restored = MonthData.from_dict(json.loads(json_str))
+        result = restored.get_split("person_with_underscores", 15)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["am"], "am_svc")
+
+
+# ================================================================
+# CELL FORMATTING
+# ================================================================
+class TestCellFormatting(unittest.TestCase):
+    """Tests for per-cell text formatting (bold, italic, underline)."""
+
+    def test_set_and_get_format(self):
+        md = MonthData(2026, 4)
+        md.set_cell_format("p1", 10, bold=True, italic=False, underline=True)
+        fmt = md.get_cell_format("p1", 10)
+        self.assertIsNotNone(fmt)
+        self.assertTrue(fmt["bold"])
+        self.assertFalse(fmt["italic"])
+        self.assertTrue(fmt["underline"])
+
+    def test_get_format_returns_none_when_absent(self):
+        md = MonthData(2026, 4)
+        self.assertIsNone(md.get_cell_format("p1", 10))
+
+    def test_clearing_all_flags_removes_entry(self):
+        md = MonthData(2026, 4)
+        md.set_cell_format("p1", 10, bold=True)
+        md.set_cell_format("p1", 10, bold=False, italic=False, underline=False)
+        self.assertIsNone(md.get_cell_format("p1", 10))
+        self.assertNotIn(("p1", 10), md.cell_formats)
+
+    def test_format_serialization_roundtrip(self):
+        md = MonthData(2026, 4)
+        md.set_cell_format("p1", 5, bold=True, italic=True, underline=False)
+        md.set_cell_format("p2", 10, bold=False, italic=False, underline=True)
+        data = md.to_dict()
+        json_str = json.dumps(data)
+        restored = MonthData.from_dict(json.loads(json_str))
+        fmt1 = restored.get_cell_format("p1", 5)
+        self.assertTrue(fmt1["bold"])
+        self.assertTrue(fmt1["italic"])
+        self.assertFalse(fmt1["underline"])
+        fmt2 = restored.get_cell_format("p2", 10)
+        self.assertFalse(fmt2["bold"])
+        self.assertTrue(fmt2["underline"])
+
+    def test_format_absent_in_old_files(self):
+        """Files saved before formatting feature should load without errors."""
+        data = {
+            "year": 2026, "month": 3,
+            "assignments": {},
+            "holidays": [],
+            "comments": {}
+            # No cell_formats key
+        }
+        restored = MonthData.from_dict(data)
+        self.assertIsNone(restored.get_cell_format("p1", 5))
+        self.assertEqual(len(restored.cell_formats), 0)
+
+    def test_format_independent_of_service(self):
+        """Formatting should persist even when the service changes."""
+        md = MonthData(2026, 4)
+        md.set_service("p1", 10, "s1")
+        md.set_cell_format("p1", 10, bold=True)
+        md.set_service("p1", 10, "s2")  # Change service
+        fmt = md.get_cell_format("p1", 10)
+        self.assertIsNotNone(fmt)
+        self.assertTrue(fmt["bold"])
+
+    def test_format_persists_after_clearing_service(self):
+        """Formatting should persist even when the service is cleared."""
+        md = MonthData(2026, 4)
+        md.set_service("p1", 10, "s1")
+        md.set_cell_format("p1", 10, italic=True)
+        md.set_service("p1", 10, None)  # Clear service
+        fmt = md.get_cell_format("p1", 10)
+        self.assertIsNotNone(fmt)
+        self.assertTrue(fmt["italic"])
+
+    def test_multiple_cells_independent(self):
+        md = MonthData(2026, 4)
+        md.set_cell_format("p1", 10, bold=True)
+        md.set_cell_format("p1", 11, italic=True)
+        md.set_cell_format("p2", 10, underline=True)
+        self.assertTrue(md.get_cell_format("p1", 10)["bold"])
+        self.assertFalse(md.get_cell_format("p1", 10).get("italic", False))
+        self.assertTrue(md.get_cell_format("p1", 11)["italic"])
+        self.assertTrue(md.get_cell_format("p2", 10)["underline"])
+
+    def test_format_all_three_flags(self):
+        md = MonthData(2026, 4)
+        md.set_cell_format("p1", 10, bold=True, italic=True, underline=True)
+        fmt = md.get_cell_format("p1", 10)
+        self.assertTrue(fmt["bold"])
+        self.assertTrue(fmt["italic"])
+        self.assertTrue(fmt["underline"])
+
+    def test_format_with_underscore_person_id(self):
+        md = MonthData(2026, 4)
+        md.set_cell_format("person_with_underscores", 15, bold=True)
+        data = md.to_dict()
+        restored = MonthData.from_dict(json.loads(json.dumps(data)))
+        fmt = restored.get_cell_format("person_with_underscores", 15)
+        self.assertIsNotNone(fmt)
+        self.assertTrue(fmt["bold"])
+
+
+# ================================================================
 # TEST RUNNER
 # ================================================================
 def run_tests():
@@ -1024,6 +1331,8 @@ def run_tests():
         TestBuildSafety,
         TestAppState,
         TestAppStateSaveCallSites,
+        TestSplitService,
+        TestCellFormatting,
     ]
 
     for cls in test_classes:

@@ -13,6 +13,7 @@ class CopyPasteHandler:
         self.clipboard_service_id = None
         self.clipboard_cell = None
         self.clipboard_note_text = None
+        self.clipboard_split_data = None
 
     def is_clipboard_valid(self) -> bool:
         """
@@ -99,6 +100,12 @@ class CopyPasteHandler:
                 self.clipboard_note_text = month_data.get_note(person.id, day)
             else:
                 self.clipboard_note_text = None
+            
+            # Capture Split data
+            if service_id == "builtin_split":
+                self.clipboard_split_data = month_data.get_split(person.id, day)
+            else:
+                self.clipboard_split_data = None
 
             self.mw.table.viewport().update()
             return True
@@ -141,6 +148,10 @@ class CopyPasteHandler:
             # Apply Note if needed
             if self.clipboard_service_id == "builtin_note":
                 month_data.set_note(person.id, day, self.clipboard_note_text)
+            
+            # Apply Split data if needed
+            if self.clipboard_service_id == "builtin_split" and self.clipboard_split_data:
+                month_data.set_split(person.id, day, self.clipboard_split_data["am"], self.clipboard_split_data["pm"])
 
             # UI Update
             self.mw.refresh_cell(index.row(), index.column())

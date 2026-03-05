@@ -309,6 +309,8 @@ class MonthData:
         self.holidays = set()
         self.comments = {} # person_id -> str
         self.notes = {} # (person_id, day) -> str
+        self.split_data = {} # (person_id, day) -> {"am": service_id, "pm": service_id}
+        self.cell_formats = {} # (person_id, day) -> {"bold": bool, "italic": bool, "underline": bool}
 
     def get_service(self, person_id, day):
         return self.assignments.get((person_id, day))
@@ -320,9 +322,13 @@ class MonthData:
             # User said "right click deletes it", implying deleting service deletes note.
             # I will assume yes.
             self.notes.pop((person_id, day), None)
+            self.split_data.pop((person_id, day), None)
         
         else :
             self.assignments[(person_id, day)] = service_id
+            # Clear orphaned split data when overwriting with a non-split service
+            if service_id != "builtin_split":
+                self.split_data.pop((person_id, day), None)
 
     def get_comment(self, person_id):
         return self.comments.get(person_id, "")
@@ -342,6 +348,30 @@ class MonthData:
         else:
             self.notes[(person_id, day)] = text
 
+    def get_split(self, person_id, day):
+        """Returns split data dict {"am": service_id, "pm": service_id} or None."""
+        return self.split_data.get((person_id, day))
+
+    def set_split(self, person_id, day, am_service_id, pm_service_id):
+        """Set split service data for a cell."""
+        if am_service_id is None and pm_service_id is None:
+            self.split_data.pop((person_id, day), None)
+        else:
+            self.split_data[(person_id, day)] = {"am": am_service_id, "pm": pm_service_id}
+
+    def get_cell_format(self, person_id, day):
+        """Returns cell format dict {"bold": bool, "italic": bool, "underline": bool} or None."""
+        return self.cell_formats.get((person_id, day))
+
+    def set_cell_format(self, person_id, day, bold=False, italic=False, underline=False):
+        """Set text formatting for a cell."""
+        if not bold and not italic and not underline:
+            self.cell_formats.pop((person_id, day), None)
+        else:
+            self.cell_formats[(person_id, day)] = {
+                "bold": bold, "italic": italic, "underline": underline
+            }
+
     def toggle_holiday(self, day: int):
         if day in self.holidays:
             self.holidays.remove(day)
@@ -360,6 +390,14 @@ class MonthData:
                 f"{person_id}_{day}": text
                 for (person_id, day), text in self.notes.items()
             },
+            "split_data": {
+                f"{person_id}_{day}": data
+                for (person_id, day), data in self.split_data.items()
+            },
+            "cell_formats": {
+                f"{person_id}_{day}": fmt
+                for (person_id, day), fmt in self.cell_formats.items()
+            },
             "holidays": list(self.holidays),
             "comments": self.comments
         }
@@ -376,6 +414,12 @@ class MonthData:
         month.notes = {
              tuple(k.split("_")[0:2] if len(k.split("_")) == 2 else (k.rpartition('_')[0], k.rpartition('_')[2])): v
              for k, v in raw_notes.items()
+        }
+        # Handle split_data
+        raw_split = data.get("split_data", {})
+        month.split_data = {
+             tuple(k.split("_")[0:2] if len(k.split("_")) == 2 else (k.rpartition('_')[0], k.rpartition('_')[2])): v
+             for k, v in raw_split.items()
         }
         
         # Correction for key parsing: person_id can contain underscores? 
@@ -397,6 +441,20 @@ class MonthData:
         month.notes = {
             (pid, int(d)): val 
             for (pid, d), val in month.notes.items()
+        }
+        month.split_data = {
+            (pid, int(d)): val 
+            for (pid, d), val in month.split_data.items()
+        }
+        # Handle cell_formats
+        raw_formats = data.get("cell_formats", {})
+        month.cell_formats = {
+             tuple(k.split("_")[0:2] if len(k.split("_")) == 2 else (k.rpartition('_')[0], k.rpartition('_')[2])): v
+             for k, v in raw_formats.items()
+        }
+        month.cell_formats = {
+            (pid, int(d)): val 
+            for (pid, d), val in month.cell_formats.items()
         }
 
         return month

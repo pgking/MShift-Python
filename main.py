@@ -61,8 +61,10 @@ from ui_setup import setup_main_window_ui
 from drag_drop_handler import DragDropHandler
 from copy_paste_handler import CopyPasteHandler
 from migration import rebuild_rows_from_sections
+from split_dialog import SplitServiceDialog
+from format_dialog import CellFormatDialog
 
-VERSION = "1.0.17"
+VERSION = "1.0.18"
 
 # ============================================================
 # Constants
@@ -1004,6 +1006,9 @@ class MainWindow(QMainWindow):
         if self.copy_paste_handler.handle_events(obj, event):
             return True
         
+        if self._handle_ctrl_click(obj, event):
+            return True
+        
         if self.drag_drop_handler.handle_events(obj, event):
             return True
         
@@ -1138,6 +1143,55 @@ class MainWindow(QMainWindow):
 
         return True
 
+    def _handle_ctrl_click(self, obj, event) -> bool:
+        """Handle Ctrl+Left Click to open cell formatting dialog."""
+        if obj is not self.table.viewport():
+            return False
+        
+        if event.type() != QEvent.MouseButtonPress:
+            return False
+        
+        if event.button() != Qt.LeftButton:
+            return False
+        
+        modifiers = QApplication.keyboardModifiers()
+        if not (modifiers & Qt.ControlModifier):
+            return False
+        
+        # Don't trigger if Shift is also held
+        if modifiers & Qt.ShiftModifier:
+            return False
+        
+        index = self.table.indexAt(event.pos())
+        if not index.isValid():
+            return True
+        
+        row = index.row()
+        col = index.column()
+        
+        resolved = self._resolve_person_cell(row, col)
+        if not resolved:
+            return True
+        
+        person, month_data, day = resolved
+        
+        # Get current formatting
+        fmt = month_data.get_cell_format(person.id, day)
+        cur_bold = fmt.get("bold", False) if fmt else False
+        cur_italic = fmt.get("italic", False) if fmt else False
+        cur_underline = fmt.get("underline", False) if fmt else False
+        
+        dialog = CellFormatDialog(cur_bold, cur_italic, cur_underline, self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            bold, italic, underline = dialog.get_format()
+            month_data.set_cell_format(person.id, day, bold, italic, underline)
+            self.refresh_cell(row, col)
+            
+            if self.preferences.auto_save:
+                self.quick_save()
+        
+        return True
     
     # =====================================================
     # 10. UI HELPERS
@@ -1284,6 +1338,23 @@ class MainWindow(QMainWindow):
         
         # Handle selection
         def on_activated(index):
+            service_id = combo.itemData(index)
+            
+            # Intercept split service selection
+            if service_id == "builtin_split":
+                # Close combo first
+                if hasattr(combo, "hidePopup"):
+                    combo.hidePopup()
+                if hasattr(combo, "_service_cell"):
+                    combo._service_cell = None
+                self.table.removeCellWidget(row, column)
+                combo.deleteLater()
+                self.table.viewport().repaint()
+                
+                # Open split dialog
+                QTimer.singleShot(10, lambda: self._open_split_dialog(row, column))
+                return
+            
             combo._service_cell.apply_service_by_index(index)
             self.table.removeCellWidget(row, column)
             self.table.viewport().update()
@@ -1727,17 +1798,55 @@ class MainWindow(QMainWindow):
                             item.setToolTip(note_text)
                         else:
                             item.setText(service.short_name)
+                        item.setBackground(QBrush(QColor(service.color_hex)))
+                        item.setData(Qt.UserRole, None)  # Clear split marker
+                    elif service.id == "builtin_split":
+                        # Split cell - store rendering data in item
+                        split_info = month_data.get_split(person.id, day)
+                        if split_info:
+                            am_svc = next((s for s in self.services if s.id == split_info["am"]), None) if split_info.get("am") else None
+                            pm_svc = next((s for s in self.services if s.id == split_info["pm"]), None) if split_info.get("pm") else None
+                            
+                            item.setData(Qt.UserRole, "split")
+                            item.setData(Qt.UserRole + 1, am_svc.color_hex if am_svc else "#FFFFFF")
+                            item.setData(Qt.UserRole + 2, pm_svc.color_hex if pm_svc else "#FFFFFF")
+                            item.setData(Qt.UserRole + 3, am_svc.short_name if am_svc else "")
+                            item.setData(Qt.UserRole + 4, pm_svc.short_name if pm_svc else "")
+                            
+                            # Build tooltip
+                            am_name = am_svc.name if am_svc else "—"
+                            pm_name = pm_svc.name if pm_svc else "—"
+                            item.setToolTip(f"Matin : {am_name}\nAprès-midi : {pm_name}")
+                        else:
+                            item.setData(Qt.UserRole, "split")
+                            item.setData(Qt.UserRole + 1, "#FFFFFF")
+                            item.setData(Qt.UserRole + 2, "#FFFFFF")
+                            item.setData(Qt.UserRole + 3, "")
+                            item.setData(Qt.UserRole + 4, "")
+                        
+                        item.setText("")  # Text drawn by custom painter
+                        item.setBackground(QBrush(QColor("#FFFFFF")))  # Placeholder
                     else:
                         item.setText(service.short_name)
                         item.setToolTip("")
-
-                    item.setBackground(QBrush(QColor(service.color_hex)))
+                        item.setBackground(QBrush(QColor(service.color_hex)))
+                        item.setData(Qt.UserRole, None)  # Clear split marker
                 else:
                     item.setText("?")
                     item.setBackground(QBrush(QColor("#FF5555")))
+                    item.setData(Qt.UserRole, None)
             else:
                 item.setText("")
                 item.setBackground(QBrush())
+                item.setData(Qt.UserRole, None)
+
+            # Apply cell text formatting (bold/italic/underline)
+            fmt = month_data.get_cell_format(person.id, day)
+            font = item.font()
+            font.setBold(fmt.get("bold", False) if fmt else False)
+            font.setItalic(fmt.get("italic", False) if fmt else False)
+            font.setUnderline(fmt.get("underline", False) if fmt else False)
+            item.setFont(font)
 
         self.table.blockSignals(False)
 
@@ -1795,6 +1904,20 @@ class MainWindow(QMainWindow):
             # Schedule the dialog opening slightly later to allow the event loop
             # to process the combo destruction/popup closing.
             QTimer.singleShot(10, lambda: self._open_note_dialog(month_data, person.id, day, row, col))
+        
+        elif service_id == "builtin_split":
+            # Re-open split dialog for editing
+            combo = self.table.cellWidget(row, col)
+            if combo:
+                if hasattr(combo, "hidePopup"):
+                    combo.hidePopup()
+                if hasattr(combo, "_service_cell"):
+                    combo._service_cell = None
+                self.table.removeCellWidget(row, col)
+                combo.deleteLater()
+            
+            self.table.viewport().repaint()
+            QTimer.singleShot(10, lambda: self._open_split_dialog(row, col))
 
     def _open_note_dialog(self, month_data, person_id, day, row, col):
         """Helper to open the note dialog async."""
@@ -1809,6 +1932,43 @@ class MainWindow(QMainWindow):
         if ok:
             month_data.set_note(person_id, day, text)
             self.refresh_cell(row, col)
+            if self.preferences.auto_save:
+                self.quick_save()
+
+    def _open_split_dialog(self, row, col):
+        """Open the split service dialog for a cell."""
+        resolved = self._resolve_person_cell(row, col)
+        if not resolved:
+            return
+        
+        person, month_data, day = resolved
+        
+        # Get existing split data if re-editing
+        existing_split = month_data.get_split(person.id, day)
+        current_am = existing_split["am"] if existing_split else None
+        current_pm = existing_split["pm"] if existing_split else None
+        
+        dialog = SplitServiceDialog(self.services, current_am, current_pm, self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            am_id, pm_id = dialog.get_selection()
+            
+            if am_id is None and pm_id is None:
+                # Clear the split - remove service entirely
+                self.apply_assignment_change(
+                    person_id=person.id, day=day, service_id=None,
+                    reason="split_clear"
+                )
+            else:
+                # Apply the split service marker
+                self.apply_assignment_change(
+                    person_id=person.id, day=day, service_id="builtin_split",
+                    reason="split_assign"
+                )
+                # Store the split data  
+                month_data.set_split(person.id, day, am_id, pm_id)
+                self.refresh_cell(row, col)
+                
             if self.preferences.auto_save:
                 self.quick_save()
 

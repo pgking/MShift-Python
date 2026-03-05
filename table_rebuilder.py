@@ -177,11 +177,45 @@ class TableRebuilder:
                                 item.setToolTip(note_text)
                             else:
                                 item.setText(service.short_name) # "📝"
+                            item.setBackground(QBrush(QColor(service.color_hex)))
+                        elif service.id == "builtin_split":
+                            # Split cell - store rendering data
+                            split_info = month_data.get_split(person.id, day)
+                            if split_info:
+                                am_svc = next((s for s in self.mw.services if s.id == split_info["am"]), None) if split_info.get("am") else None
+                                pm_svc = next((s for s in self.mw.services if s.id == split_info["pm"]), None) if split_info.get("pm") else None
+                                
+                                item.setData(Qt.UserRole, "split")
+                                item.setData(Qt.UserRole + 1, am_svc.color_hex if am_svc else "#FFFFFF")
+                                item.setData(Qt.UserRole + 2, pm_svc.color_hex if pm_svc else "#FFFFFF")
+                                item.setData(Qt.UserRole + 3, am_svc.short_name if am_svc else "")
+                                item.setData(Qt.UserRole + 4, pm_svc.short_name if pm_svc else "")
+                                
+                                am_name = am_svc.name if am_svc else "—"
+                                pm_name = pm_svc.name if pm_svc else "—"
+                                item.setToolTip(f"Matin : {am_name}\nAprès-midi : {pm_name}")
+                            else:
+                                item.setData(Qt.UserRole, "split")
+                                item.setData(Qt.UserRole + 1, "#FFFFFF")
+                                item.setData(Qt.UserRole + 2, "#FFFFFF")
+                                item.setData(Qt.UserRole + 3, "")
+                                item.setData(Qt.UserRole + 4, "")
+                            
+                            item.setText("")
+                            item.setBackground(QBrush(QColor("#FFFFFF")))
                         else:
                             # Standard service
                             item.setText(service.short_name)
-                        
-                        item.setBackground(QBrush(QColor(service.color_hex)))
+                            item.setBackground(QBrush(QColor(service.color_hex)))
+                
+                # Apply cell text formatting (bold/italic/underline)
+                fmt = month_data.get_cell_format(person.id, day)
+                if fmt:
+                    font = item.font()
+                    font.setBold(fmt.get("bold", False))
+                    font.setItalic(fmt.get("italic", False))
+                    font.setUnderline(fmt.get("underline", False))
+                    item.setFont(font)
                 
                 self.table.setItem(row_index, col, item)
 
