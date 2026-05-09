@@ -64,7 +64,7 @@ from migration import rebuild_rows_from_sections
 from split_dialog import SplitServiceDialog
 from format_dialog import CellFormatDialog
 
-VERSION = "1.0.18"
+VERSION = "1.0.19"
 
 # ============================================================
 # Constants
@@ -1448,7 +1448,7 @@ class MainWindow(QMainWindow):
             if self.preferences.auto_save:
                 self.quick_save()
 
-    def quick_save(self):
+    def quick_save(self, force_prompt=False):
         if self.current_file_path:
             self._is_saving_to_disk = True
             try:
@@ -1473,12 +1473,12 @@ class MainWindow(QMainWindow):
                 )
             finally:
                 self._is_saving_to_disk = False
-        else:
+        elif force_prompt:
             self.save_file()
 
     def save_and_exit(self):
         print("Save and exit triggered")
-        self.quick_save()
+        self.quick_save(force_prompt=True)
         QApplication.quit()
 
     def new_file(self):
@@ -1918,6 +1918,20 @@ class MainWindow(QMainWindow):
             
             self.table.viewport().repaint()
             QTimer.singleShot(10, lambda: self._open_split_dialog(row, col))
+            
+        else:
+            service = next((s for s in self.services if s.id == service_id), None)
+            if service and service.short_name == "CA":
+                combo = self.table.cellWidget(row, col)
+                if combo:
+                    if hasattr(combo, "hidePopup"):
+                        combo.hidePopup()
+                    if hasattr(combo, "_service_cell"):
+                        combo._service_cell = None
+                    self.table.removeCellWidget(row, col)
+                    combo.deleteLater()
+                self.table.viewport().repaint()
+                QTimer.singleShot(10, lambda: self._open_ca_extension_dialog(person.id, month_data.year, month_data.month, day, service_id, row, col))
 
     def _open_note_dialog(self, month_data, person_id, day, row, col):
         """Helper to open the note dialog async."""
@@ -1971,6 +1985,77 @@ class MainWindow(QMainWindow):
                 
             if self.preferences.auto_save:
                 self.quick_save()
+
+    def _open_ca_extension_dialog(self, person_id, start_year, start_month, start_day, service_id, row, col):
+        from PyQt5.QtCore import QDate
+        from dialogs import ExtendCADialog
+        
+        start_date = QDate(start_year, start_month, start_day)
+        dialog = ExtendCADialog(start_date, self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            end_date = dialog.get_end_date()
+            
+            if end_date <= start_date:
+                return
+                
+            # Perform bulk change
+            changes = []
+            
+            # Iterate from start_date to end_date
+            current_date = start_date
+            
+            while current_date <= end_date:
+                y, m, d = current_date.year(), current_date.month(), current_date.day()
+                
+                md = self.controller.get_month_data(y, m)
+                old_service = md.get_service(person_id, d)
+                
+                if old_service != service_id:
+                    changes.append({
+                        "year": y,
+                        "month": m,
+                        "day": d,
+                        "person_id": person_id,
+                        "old_service_id": old_service,
+                        "new_service_id": service_id
+                    })
+                    
+                current_date = current_date.addDays(1)
+                
+            if not changes:
+                return
+                
+            # Record undo action
+            person = self.controller.get_person_by_id(person_id)
+            name = person.display_name if person else "Person"
+            date_str = f"{start_day:02d}/{start_month:02d}/{start_year}"
+            end_date_str = end_date.toString("dd/MM/yyyy")
+            
+            self.controller.undo_manager.record_bulk_service_change(
+                f"Prolonger CA pour {name} ({date_str} au {end_date_str})",
+                changes
+            )
+            
+            # Disable autosave during loop to avoid massive disk IO
+            old_auto_save = self.preferences.auto_save
+            self.preferences.auto_save = False
+            
+            try:
+                for c in changes:
+                    self.apply_assignment_change(
+                        person_id=c["person_id"],
+                        day=c["day"],
+                        service_id=c["new_service_id"],
+                        year=c["year"],
+                        month=c["month"],
+                        reason="bulk_ca_extension"
+                    )
+            finally:
+                self.preferences.auto_save = old_auto_save
+                self.menu_bar.update_undo_redo_actions()
+                if self.preferences.auto_save:
+                    self.quick_save()
 
     def get_day_service_violations_for_column(self, column: int):
         """

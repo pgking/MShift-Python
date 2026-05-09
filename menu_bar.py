@@ -64,7 +64,7 @@ class MenuBar(QMenuBar):
 
         save_action = QAction("Save", self)
         save_action.setShortcut(QKeySequence.Save)
-        save_action.triggered.connect(self.parent.quick_save)
+        save_action.triggered.connect(lambda: self.parent.quick_save(force_prompt=True))
 
         save_as_action = QAction("Save As…", self)
         save_as_action.setShortcut(QKeySequence("Ctrl+Shift+S"))

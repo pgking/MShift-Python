@@ -17,14 +17,53 @@ from PyQt5.QtWidgets import (
     QRadioButton,
     QButtonGroup,
     QTableWidget,
-   QTableWidgetItem
+   QTableWidgetItem,
+   QDateEdit
 )
 
 from PyQt5.QtGui import QColor, QBrush
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QDate
 
 from models import Person, Service, Schema
 from preferences import Preferences
+
+class ExtendCADialog(QDialog):
+    def __init__(self, start_date: QDate, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Prolonger Congés Annuels (CA)")
+        self.setFixedSize(320, 160)
+        
+        layout = QVBoxLayout(self)
+        
+        info_label = QLabel(f"Date de début : {start_date.toString('dd/MM/yyyy')}")
+        layout.addWidget(info_label)
+        
+        form_layout = QFormLayout()
+        self.end_date_edit = QDateEdit()
+        self.end_date_edit.setCalendarPopup(True)
+        self.end_date_edit.setDate(start_date.addDays(1))
+        self.end_date_edit.setMinimumDate(start_date)
+        
+        form_layout.addRow("Date de fin :", self.end_date_edit)
+        layout.addLayout(form_layout)
+        
+        buttons_layout = QHBoxLayout()
+        self.ok_btn = QPushButton("Valider")
+        self.cancel_btn = QPushButton("Annuler")
+        
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(self.ok_btn)
+        buttons_layout.addWidget(self.cancel_btn)
+        
+        layout.addWidget(QWidget()) # spacer
+        layout.addLayout(buttons_layout)
+        
+        self.ok_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+        
+    def get_end_date(self) -> QDate:
+        return self.end_date_edit.date()
+
 
 class AddPersonDialog(QDialog):
     def __init__(self, sections=None):
