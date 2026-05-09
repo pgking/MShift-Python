@@ -64,7 +64,7 @@ from migration import rebuild_rows_from_sections
 from split_dialog import SplitServiceDialog
 from format_dialog import CellFormatDialog
 
-VERSION = "1.0.19"
+VERSION = "1.0.20"
 
 # ============================================================
 # Constants
@@ -1355,6 +1355,26 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(10, lambda: self._open_split_dialog(row, column))
                 return
             
+            # Intercept CA service selection — apply it then open extension dialog
+            ca_service = next((s for s in self.services if s.id == service_id and s.short_name == "CA"), None)
+            if ca_service:
+                # Apply CA to the clicked cell first
+                combo._service_cell.apply_service_by_index(index)
+                if hasattr(combo, "hidePopup"):
+                    combo.hidePopup()
+                if hasattr(combo, "_service_cell"):
+                    combo._service_cell = None
+                self.table.removeCellWidget(row, column)
+                combo.deleteLater()
+                self.table.viewport().repaint()
+                
+                # Resolve day context to get year/month/day
+                month_data, day = self._resolve_day_context(column)
+                person_id = self.rows[row]["person_id"]
+                QTimer.singleShot(10, lambda: self._open_ca_extension_dialog(
+                    person_id, month_data.year, month_data.month, day, service_id, row, column))
+                return
+            
             combo._service_cell.apply_service_by_index(index)
             self.table.removeCellWidget(row, column)
             self.table.viewport().update()
@@ -2002,7 +2022,7 @@ class MainWindow(QMainWindow):
             # Perform bulk change
             changes = []
             
-            # Iterate from start_date to end_date
+            # 1. Fill CA from start_date to end_date
             current_date = start_date
             
             while current_date <= end_date:
@@ -2022,6 +2042,27 @@ class MainWindow(QMainWindow):
                     })
                     
                 current_date = current_date.addDays(1)
+            
+            # 2. Auto-shrink: clear any consecutive CA days beyond end_date
+            #    (handles the case where a previous CA range was longer)
+            shrink_date = end_date.addDays(1)
+            while True:
+                y, m, d = shrink_date.year(), shrink_date.month(), shrink_date.day()
+                md = self.controller.get_month_data(y, m)
+                existing = md.get_service(person_id, d)
+                
+                if existing != service_id:
+                    break  # No more consecutive CA days, stop
+                
+                changes.append({
+                    "year": y,
+                    "month": m,
+                    "day": d,
+                    "person_id": person_id,
+                    "old_service_id": existing,
+                    "new_service_id": None  # Clear the day
+                })
+                shrink_date = shrink_date.addDays(1)
                 
             if not changes:
                 return
@@ -2033,7 +2074,7 @@ class MainWindow(QMainWindow):
             end_date_str = end_date.toString("dd/MM/yyyy")
             
             self.controller.undo_manager.record_bulk_service_change(
-                f"Prolonger CA pour {name} ({date_str} au {end_date_str})",
+                f"CA pour {name} ({date_str} au {end_date_str})",
                 changes
             )
             
